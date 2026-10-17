@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Blender Render</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<main class="wrap narrow">
+  <form class="card login" method="post" action="/login">
+    <h1>Blender Render</h1>
+    <p class="hint">Enter the access key printed in the Colab notebook.</p>
+    {% if wrong %}<p class="msg err">That key is not right.</p>{% endif %}
+    <input type="password" name="key" placeholder="Access key" autofocus required>
+    <button type="submit" class="btn primary">Open</button>
+  </form>
+</main>
+</body>
+</html>
