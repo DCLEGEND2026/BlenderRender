@@ -85,26 +85,30 @@
     });
     drop.addEventListener('drop', function (e) { setFile(e.dataTransfer.files[0]); });
 
-    function syncMode() {
-        var mode = form.mode.value;
+    // Show only the fields for the chosen render mode and engine.
+    function syncForm() {
+        var mode = form.mode.value, engine = form.engine.value;
         Array.prototype.forEach.call(form.querySelectorAll('[data-show]'), function (el) {
             el.hidden = el.dataset.show !== mode;
         });
+        Array.prototype.forEach.call(form.querySelectorAll('[data-engine]'), function (el) {
+            el.hidden = el.dataset.engine.split(' ').indexOf(engine) === -1;
+        });
     }
-    Array.prototype.forEach.call(form.mode, function (r) { r.addEventListener('change', syncMode); });
-    form.engine.addEventListener('change', function () {
-        document.getElementById('eevee-hint').hidden = form.engine.value !== 'eevee';
-        form.device.disabled = form.engine.value === 'eevee' || form.engine.value === 'workbench';
+    Array.prototype.forEach.call(form.querySelectorAll('input[name=mode], input[name=engine]'), function (r) {
+        r.addEventListener('change', syncForm);
     });
-    syncMode();
+    syncForm();
 
+    // Every visible setting; empty boxes and "From file" are left out so the .blend's value is kept.
     function options() {
         var o = {};
-        ['mode', 'engine', 'device', 'format', 'frame', 'frame_start', 'frame_end', 'samples', 'resolution_pct'].forEach(function (k) {
-            var v = form[k].value;
-            if (v !== '') o[k] = v;
+        Array.prototype.forEach.call(form.querySelectorAll('input[name], select[name]'), function (el) {
+            if (el.type === 'file' || el.closest('[hidden]')) return;
+            if (el.type === 'radio') { if (el.checked) o[el.name] = el.value; return; }
+            if (el.type === 'checkbox') { o[el.name] = el.checked; return; }
+            if (el.value !== '' && el.value !== 'file') o[el.name] = el.value;
         });
-        o.video = form.video.checked;
         return o;
     }
 
@@ -268,6 +272,9 @@
         meta.push(o.mode === 'animation' ? 'Animation' : 'Still');
         if (job.info.engine) meta.push(job.info.engine.replace('BLENDER_', '').replace('_NEXT', '').toLowerCase());
         if (job.info.width) meta.push(job.info.width + '×' + job.info.height);
+        if (o.samples) meta.push(o.samples + ' samples');
+        if (o.noise_threshold !== null && o.noise_threshold !== undefined) meta.push(o.noise_threshold ? 'noise ' + o.noise_threshold : 'adaptive off');
+        if (o.eevee_samples) meta.push(o.eevee_samples + ' samples');
         if (job.info.blender) meta.push('Blender ' + job.info.blender);
         el.querySelector('.job-meta').textContent = meta.join(' · ');
 

@@ -30,10 +30,18 @@ request limit doesn't apply.
 | Option | Notes |
 | --- | --- |
 | Still image / Animation | Still renders one frame (the file's current frame by default). Animation renders the file's frame range, or the start/end you enter. |
-| Engine | *As saved in the file*, Cycles, Eevee or Workbench. Use **Cycles**: Eevee needs a display and may fail on Colab. |
-| Cycles device | GPU uses OptiX, falling back to CUDA, on the Colab GPU. |
-| Samples, Resolution % | Leave empty to keep the values from the file. |
-| Image format | PNG, JPEG or OpenEXR. |
+| Render engine | Cycles (default), Eevee, Workbench, or *As in file*. Use **Cycles**: Eevee needs a display and may fail on Colab. |
+| Resolution %, Image format | Resolution scale; PNG, JPEG or OpenEXR. |
+| Cycles: Device | GPU uses OptiX, falling back to CUDA, on the Colab GPU. |
+| Cycles: Max samples | Upper limit of samples per pixel. |
+| Cycles: Noise threshold | Adaptive sampling stops a pixel once it is this clean. Lower = cleaner but slower (0.01 is Blender's default, 0.1 is a quick preview). 0 turns adaptive sampling off. |
+| Cycles: Min samples | Samples every pixel gets before adaptive sampling may stop it (0 = automatic). |
+| Cycles: Time limit | Stop each frame after this many seconds (0 = no limit). |
+| Cycles: Max light bounces | Lower is faster; less light bouncing around the scene. |
+| Cycles: Denoise, Denoiser | Turn denoising on/off; OptiX (fast, on the GPU) or OpenImageDenoise. |
+| Eevee: Render samples, Ray tracing | Eevee's own quality settings. |
+
+Any box left empty (or set to *From file*) keeps the value saved in the `.blend`.
 | MP4 | Animations can also be encoded to an H.264 MP4 at the scene's frame rate. |
 
 Each render shows live progress (frame, samples, time left), a preview of every

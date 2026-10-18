@@ -131,18 +131,36 @@ def int_or_none(v, lo, hi):
     return n if lo <= n <= hi else None
 
 
+def float_or_none(v, lo, hi):
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return None
+    return n if lo <= n <= hi else None
+
+
 def clean_options(raw):
     raw = raw or {}
     pick = lambda key, allowed, default: raw.get(key) if raw.get(key) in allowed else default
     mode = pick("mode", ("still", "animation"), "still")
     opts = {
         "mode": mode,
-        "engine": pick("engine", ("file", "cycles", "eevee", "workbench"), "file"),
-        "device": pick("device", ("gpu", "cpu"), "gpu"),
+        "engine": pick("engine", ("file", "cycles", "eevee", "workbench"), "cycles"),
         "format": pick("format", ("PNG", "JPEG", "OPEN_EXR"), "PNG"),
-        "samples": int_or_none(raw.get("samples"), 1, 65536),
         "resolution_pct": int_or_none(raw.get("resolution_pct"), 1, 100),
         "video": bool(raw.get("video")) and mode == "animation",
+        # Cycles (None / "file" = keep what the .blend has)
+        "device": pick("device", ("gpu", "cpu"), "gpu"),
+        "samples": int_or_none(raw.get("samples"), 1, 65536),
+        "noise_threshold": float_or_none(raw.get("noise_threshold"), 0, 1),
+        "min_samples": int_or_none(raw.get("min_samples"), 0, 65536),
+        "time_limit": float_or_none(raw.get("time_limit"), 0, 86400),
+        "max_bounces": int_or_none(raw.get("max_bounces"), 0, 1024),
+        "denoise": pick("denoise", ("file", "on", "off"), "file"),
+        "denoiser": pick("denoiser", ("file", "OPTIX", "OPENIMAGEDENOISE"), "file"),
+        # Eevee
+        "eevee_samples": int_or_none(raw.get("eevee_samples"), 1, 65536),
+        "eevee_raytracing": pick("eevee_raytracing", ("file", "on", "off"), "file"),
     }
     if mode == "still":
         opts["frame"] = int_or_none(raw.get("frame"), -1048574, 1048574)

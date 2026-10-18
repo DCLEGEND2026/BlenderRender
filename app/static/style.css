@@ -78,7 +78,20 @@ h1 { font-size: 18px; margin: 0 0 14px; }
     margin-top: 18px;
 }
 .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.field.wide { grid-column: 1 / -1; }
+.field.wide, .opts .wide { grid-column: 1 / -1; }
+.group-h {
+    grid-column: 1 / -1;
+    margin: 10px 0 -4px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .3px;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+.group-h:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.opts .hint { margin: -4px 0 0; }
 .lbl { color: var(--muted); font-size: 12.5px; }
 input[type=number], input[type=password], select {
     width: 100%;
@@ -94,7 +107,7 @@ input:focus, select:focus { outline: 2px solid rgba(208, 138, 74, .5); outline-o
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; width: fit-content; }
 .seg label { cursor: pointer; }
 .seg input { position: absolute; opacity: 0; pointer-events: none; }
-.seg span { display: block; padding: 8px 16px; color: var(--muted); }
+.seg span { display: block; padding: 8px 16px; color: var(--muted); white-space: nowrap; }
 .seg input:checked + span { background: #262b33; color: var(--text); }
 .seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: -2px; }
 .check { display: flex; align-items: center; gap: 8px; align-self: end; height: 38px; cursor: pointer; }
@@ -209,5 +222,6 @@ input:focus, select:focus { outline: 2px solid rgba(208, 138, 74, .5); outline-o
     .card { padding: 16px; }
     .sys { font-size: 12px; }
     .opts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .seg span { padding: 8px 10px; font-size: 14px; }
     .brand span { white-space: nowrap; }
 }

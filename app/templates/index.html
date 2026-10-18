@@ -28,6 +28,7 @@
       </label>
 
       <div class="opts">
+        <h3 class="group-h">Output</h3>
         <div class="field wide">
           <span class="lbl">Render</span>
           <div class="seg">
@@ -35,7 +36,6 @@
             <label><input type="radio" name="mode" value="animation"><span>Animation</span></label>
           </div>
         </div>
-
         <label class="field" data-show="still">
           <span class="lbl">Frame</span>
           <input type="number" name="frame" placeholder="Current frame">
@@ -47,27 +47,6 @@
         <label class="field" data-show="animation" hidden>
           <span class="lbl">End frame</span>
           <input type="number" name="frame_end" placeholder="From file">
-        </label>
-
-        <label class="field">
-          <span class="lbl">Engine</span>
-          <select name="engine">
-            <option value="file">As saved in the file</option>
-            <option value="cycles">Cycles</option>
-            <option value="eevee">Eevee</option>
-            <option value="workbench">Workbench</option>
-          </select>
-        </label>
-        <label class="field">
-          <span class="lbl">Cycles device</span>
-          <select name="device">
-            <option value="gpu">GPU (Colab)</option>
-            <option value="cpu">CPU</option>
-          </select>
-        </label>
-        <label class="field">
-          <span class="lbl">Samples</span>
-          <input type="number" name="samples" min="1" max="65536" placeholder="From file">
         </label>
         <label class="field">
           <span class="lbl">Resolution %</span>
@@ -84,8 +63,79 @@
         <label class="check" data-show="animation" hidden>
           <input type="checkbox" name="video" checked> Also make an MP4 video
         </label>
+
+        <h3 class="group-h">Render engine</h3>
+        <div class="field wide">
+          <div class="seg">
+            <label><input type="radio" name="engine" value="cycles" checked><span>Cycles</span></label>
+            <label><input type="radio" name="engine" value="eevee"><span>Eevee</span></label>
+            <label><input type="radio" name="engine" value="workbench"><span>Workbench</span></label>
+            <label><input type="radio" name="engine" value="file"><span>As in file</span></label>
+          </div>
+        </div>
+        <p class="hint wide" data-engine="eevee" hidden>Eevee needs OpenGL and may fail on Colab. Cycles on the GPU is the reliable choice.</p>
+        <p class="hint wide" data-engine="file" hidden>Uses the engine saved in the .blend. The Cycles or Eevee settings below apply only if the file uses that engine.</p>
+
+        <h3 class="group-h" data-engine="cycles file">Cycles</h3>
+        <label class="field" data-engine="cycles file">
+          <span class="lbl">Device</span>
+          <select name="device">
+            <option value="gpu">GPU (Colab)</option>
+            <option value="cpu">CPU</option>
+          </select>
+        </label>
+        <label class="field" data-engine="cycles file">
+          <span class="lbl">Max samples</span>
+          <input type="number" name="samples" min="1" max="65536" placeholder="From file">
+        </label>
+        <label class="field" data-engine="cycles file">
+          <span class="lbl">Noise threshold</span>
+          <input type="number" name="noise_threshold" min="0" max="1" step="0.001" placeholder="From file">
+        </label>
+        <label class="field" data-engine="cycles file">
+          <span class="lbl">Min samples (0 = auto)</span>
+          <input type="number" name="min_samples" min="0" max="65536" placeholder="From file">
+        </label>
+        <label class="field" data-engine="cycles file">
+          <span class="lbl">Time limit (sec, 0 = none)</span>
+          <input type="number" name="time_limit" min="0" max="86400" step="1" placeholder="From file">
+        </label>
+        <label class="field" data-engine="cycles file">
+          <span class="lbl">Max light bounces</span>
+          <input type="number" name="max_bounces" min="0" max="1024" placeholder="From file">
+        </label>
+        <label class="field" data-engine="cycles file">
+          <span class="lbl">Denoise</span>
+          <select name="denoise">
+            <option value="file">From file</option>
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <label class="field" data-engine="cycles file">
+          <span class="lbl">Denoiser</span>
+          <select name="denoiser">
+            <option value="file">From file</option>
+            <option value="OPTIX">OptiX (GPU, fast)</option>
+            <option value="OPENIMAGEDENOISE">OpenImageDenoise</option>
+          </select>
+        </label>
+        <p class="hint wide" data-engine="cycles file">Noise threshold: lower = cleaner but slower (0.01 is Blender's default, 0.1 is a fast preview). 0 turns adaptive sampling off, so every pixel gets the max samples.</p>
+
+        <h3 class="group-h" data-engine="eevee file" hidden>Eevee</h3>
+        <label class="field" data-engine="eevee file" hidden>
+          <span class="lbl">Render samples</span>
+          <input type="number" name="eevee_samples" min="1" max="65536" placeholder="From file">
+        </label>
+        <label class="field" data-engine="eevee file" hidden>
+          <span class="lbl">Ray tracing</span>
+          <select name="eevee_raytracing">
+            <option value="file">From file</option>
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
       </div>
-      <p class="hint" id="eevee-hint" hidden>Eevee needs a display/OpenGL and may fail on Colab. Cycles on the GPU is the reliable choice.</p>
 
       <div class="actions">
         <button type="submit" class="btn primary" id="go" disabled>Upload &amp; render</button>
