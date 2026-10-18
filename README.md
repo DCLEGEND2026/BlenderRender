@@ -23,7 +23,29 @@ Open the notebook, run it, and you get a link to a website where you upload a
   `.blend`, the one closest to the top of the zip is used.
 
 Big files are fine: the page uploads in 32 MB pieces, so the tunnel's 100 MB
-request limit doesn't apply.
+request limit doesn't apply. For really big projects, use Google Drive instead (below).
+
+## Google Drive (faster for big files)
+
+Uploading through the page sends the file over your internet connection and then
+through the tunnel, which is slow for big projects. Colab can read Google Drive
+directly over Google's own network, so it's much faster to put the file there.
+
+**From your Drive folder.** With `USE_GOOGLE_DRIVE` on (step 1, the default), step 4
+asks you to connect your Google Drive and makes the folder `My Drive/BlenderRender`
+(change `DRIVE_FOLDER` to use another one). Put your `.blend` or `.zip` in that folder,
+or in a subfolder. On the website, pick **Google Drive**, choose the file and press
+**Render**.
+
+- A `.blend` renders straight from Drive, so textures next to it (relative paths) work
+  without zipping anything.
+- A `.zip` is unpacked on the Colab machine. The zip in Drive is left alone.
+- A file you just added can take a minute to show up. Press **Refresh** on the list.
+- Step 5 copies your renders to `My Drive/BlenderRender/Renders`.
+
+**From a share link.** Pick **Drive link** and paste the link to a `.blend`, a `.zip` or
+a whole folder. This works for anyone's file, as long as it's shared as *Anyone with
+the link*. Folder links download every file in the folder (Google allows up to 50).
 
 ## Render options
 
@@ -111,5 +133,8 @@ pip install -r requirements.txt
 cd app
 BLENDER_BIN=/path/to/blender ACCESS_KEY=choose-a-key python server.py
 ```
+
+Set `DRIVE_DIR=/some/folder` as well to get the **Google Drive** list for any folder
+on your machine.
 
 Then open http://localhost:5000/login?key=choose-a-key.

@@ -20,7 +20,26 @@
   <section class="card">
     <h1>New render</h1>
     <form id="form" autocomplete="off">
-      <label class="drop" id="drop">
+      <div class="seg src" role="tablist">
+        <label><input type="radio" name="src" value="upload" checked><span>Upload file</span></label>
+        <label><input type="radio" name="src" value="drive"><span>Google Drive</span></label>
+        <label><input type="radio" name="src" value="link"><span>Drive link</span></label>
+      </div>
+
+      <div class="drive" data-src="drive" hidden>
+        <div class="drive-head">
+          <span class="hint" id="drive-where">Loading your Google Drive folder…</span>
+          <button type="button" class="btn sm ghost" id="drive-refresh">Refresh</button>
+        </div>
+        <div class="drive-list" id="drive-list"></div>
+      </div>
+
+      <div class="link" data-src="link" hidden>
+        <input type="url" id="drive-url" placeholder="https://drive.google.com/file/d/…" inputmode="url">
+        <p class="hint">Share the file (or a folder with the .blend and its textures) as <b>Anyone with the link</b>, then paste the link. Colab downloads it from Google directly, which is much faster than uploading through this page.</p>
+      </div>
+
+      <label class="drop" id="drop" data-src="upload">
         <input type="file" id="file" accept=".blend,.zip" hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span class="drop-main" id="drop-main">Drop a <b>.blend</b> file here, or click to choose</span>

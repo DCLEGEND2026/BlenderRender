@@ -128,7 +128,7 @@
         if (preview) schedulePreview();
     }
     function updateApply() {
-        var busy = job && ['queued', 'running', 'compositing', 'encoding'].indexOf(job.status) !== -1;
+        var busy = job && ['preparing', 'queued', 'running', 'compositing', 'encoding'].indexOf(job.status) !== -1;
         applyBtn.disabled = !job || !job.raw_frames || busy;
         applyBtn.textContent = busy && job.status !== 'running' ? 'Applying…' :
             (canon(graph) !== applied ? 'Apply to render •' : 'Apply to render');
@@ -800,7 +800,7 @@
             var wasBusy = job && ['queued', 'compositing', 'encoding'].indexOf(job.status) !== -1;
             job = d.job;
             setupFrames();
-            var busy = ['queued', 'running', 'compositing', 'encoding'].indexOf(job.status) !== -1;
+            var busy = ['preparing', 'queued', 'running', 'compositing', 'encoding'].indexOf(job.status) !== -1;
             if (job.opts.compositing && job.opts.compositing.graph) applied = canon(job.opts.compositing.graph);
             if (job.status === 'compositing' || job.status === 'encoding') {
                 showMsg(job.status === 'encoding' ? 'Making the MP4…' : 'Applying: frame ' + job.frames_done + ' of ' + job.frames_total);

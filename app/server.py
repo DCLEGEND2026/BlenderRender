@@ -5,6 +5,7 @@ Settings come from environment variables (the Colab notebook sets them):
   JOBS_DIR      where uploads and renders are kept       (default: ./jobs)
   ACCESS_KEY    password for the site; empty = no login  (default: empty)
   PORT          port to listen on                        (default: 5000)
+  DRIVE_DIR     mounted Google Drive folder to pick files from; empty = off (default: empty)
 """
 import hmac
 import io
@@ -12,6 +13,7 @@ import os
 import re
 import shutil
 import subprocess
+from urllib.parse import parse_qs, urlparse
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, send_from_directory
 
@@ -24,10 +26,13 @@ JOBS_DIR = os.path.abspath(os.environ.get("JOBS_DIR", "jobs"))
 UPLOAD_DIR = os.path.join(JOBS_DIR, "_uploads")
 ACCESS_KEY = os.environ.get("ACCESS_KEY", "")
 PORT = int(os.environ.get("PORT", "5000"))
+DRIVE_DIR = os.path.abspath(os.environ["DRIVE_DIR"]) if os.environ.get("DRIVE_DIR") else ""
 
 CHUNK_MAX = 64 * 1024 * 1024        # one upload request; the tunnel caps requests at 100 MB
 UPLOAD_MAX = 20 * 1024 * 1024 * 1024  # whole file
 RE_UPLOAD_ID = re.compile(r"^[a-f0-9]{16,32}$")
+RE_DRIVE_ID = re.compile(r"^[A-Za-z0-9_-]{10,}$")
+DRIVE_HOSTS = ("drive.google.com", "docs.google.com", "drive.usercontent.google.com")
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = CHUNK_MAX + 1024 * 1024
@@ -183,6 +188,61 @@ def clean_options(raw):
     return opts
 
 
+# ---- Google Drive ------------------------------------------------------------------
+def drive_label():
+    mine = "/content/drive/MyDrive/"
+    return "My Drive/" + DRIVE_DIR[len(mine):] if DRIVE_DIR.startswith(mine) else DRIVE_DIR
+
+
+@app.route("/api/drive")
+def drive_files():
+    """.blend and .zip files in the mounted Drive folder (and its subfolders), newest first."""
+    if not DRIVE_DIR or not os.path.isdir(DRIVE_DIR):
+        return jsonify(enabled=False, folder="", files=[])
+    files = []
+    for base, dirs, names in os.walk(DRIVE_DIR):
+        depth = os.path.relpath(base, DRIVE_DIR).count(os.sep) + (base != DRIVE_DIR)
+        # Skip the Renders folder (step 5 of the notebook copies results there) and go 3 levels deep.
+        dirs[:] = [] if depth >= 3 else [d for d in dirs if not d.startswith(".") and not (base == DRIVE_DIR and d == "Renders")]
+        for name in names:
+            if name.lower().endswith((".blend", ".zip")):
+                path = os.path.join(base, name)
+                try:
+                    st = os.stat(path)
+                except OSError:
+                    continue
+                files.append({"path": os.path.relpath(path, DRIVE_DIR), "name": name, "size": st.st_size, "mtime": st.st_mtime})
+    files.sort(key=lambda f: -f["mtime"])
+    return jsonify(enabled=True, folder=drive_label(), files=files[:500])
+
+
+def drive_path(rel):
+    """A path inside DRIVE_DIR from the page, or None if it points anywhere else."""
+    if not DRIVE_DIR or not isinstance(rel, str):
+        return None
+    path = os.path.realpath(os.path.join(DRIVE_DIR, rel))
+    if not path.startswith(os.path.realpath(DRIVE_DIR) + os.sep) or not os.path.isfile(path):
+        return None
+    return path if path.lower().endswith((".blend", ".zip")) else None
+
+
+def drive_link(url):
+    """(gdown URL, is a folder) for a Google Drive share link, or None if it isn't one."""
+    try:
+        u = urlparse(str(url).strip())
+    except ValueError:
+        return None
+    if u.scheme not in ("http", "https") or u.hostname not in DRIVE_HOSTS:
+        return None
+    parts = [p for p in u.path.split("/") if p]
+    if "folders" in parts and parts.index("folders") + 1 < len(parts):
+        fid = parts[parts.index("folders") + 1]
+        return ("https://drive.google.com/drive/folders/" + fid, True) if RE_DRIVE_ID.match(fid) else None
+    fid = parts[parts.index("d") + 1] if "d" in parts and parts.index("d") + 1 < len(parts) else \
+        (parse_qs(u.query).get("id") or [""])[0]
+    return ("https://drive.google.com/uc?id=" + fid, False) if RE_DRIVE_ID.match(fid) else None
+
+
 # ---- Jobs ------------------------------------------------------------------------
 def get_job(job_id):
     job = jobs.get(job_id)
@@ -199,13 +259,27 @@ def list_jobs():
 @app.route("/api/jobs", methods=["POST"])
 def create_job():
     body = request.get_json(silent=True) or {}
+    opts = clean_options(body.get("options"))
+    if "drive_path" in body:
+        path = drive_path(body["drive_path"])
+        if not path:
+            return jsonify(error="That file is not in the Google Drive folder any more"), 400
+        try:
+            return jsonify(job=jobs.create_from_drive(path, opts).to_dict())
+        except ValueError as e:
+            return jsonify(error=str(e)), 400
+    if "drive_url" in body:
+        link = drive_link(body["drive_url"])
+        if not link:
+            return jsonify(error="Paste a Google Drive link to a file or folder (drive.google.com/...)"), 400
+        return jsonify(job=jobs.create_from_link(link[0], link[1], opts).to_dict())
     upload_id = str(body.get("upload_id", ""))
     filename = os.path.basename(str(body.get("filename", "")))
     path = os.path.join(UPLOAD_DIR, upload_id + ".part")
     if not RE_UPLOAD_ID.match(upload_id) or not os.path.exists(path):
         return jsonify(error="Upload not found, please upload again"), 400
     try:
-        job = jobs.create(path, filename, clean_options(body.get("options")))
+        job = jobs.create(path, filename, opts)
     except ValueError as e:
         if os.path.exists(path):
             os.remove(path)

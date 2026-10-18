@@ -73,7 +73,7 @@
         drop.classList.add('has');
         dropMain.textContent = f.name;
         dropSub.textContent = size(f.size) + ' · click to choose another file';
-        goBtn.disabled = uploading;
+        syncSource();
         showMsg('');
     }
     fileInput.addEventListener('change', function () { setFile(fileInput.files[0]); });
@@ -103,6 +103,65 @@
     });
     syncForm();
 
+    // ---- Where the file comes from: upload, the mounted Google Drive folder, or a Drive link
+    var driveList = document.getElementById('drive-list'), driveWhere = document.getElementById('drive-where');
+    var driveUrl = document.getElementById('drive-url');
+    var drivePick = null, driveLoaded = false;
+
+    function source() { return form.src.value; }
+    function syncSource() {
+        var src = source();
+        Array.prototype.forEach.call(form.querySelectorAll('[data-src]'), function (el) {
+            el.hidden = el.dataset.src !== src;
+        });
+        goBtn.textContent = src === 'upload' ? 'Upload & render' : 'Render';
+        goBtn.disabled = uploading || !(src === 'upload' ? chosen : src === 'drive' ? drivePick : driveUrl.value.trim());
+        if (src === 'drive' && !driveLoaded) loadDrive();
+    }
+    function loadDrive() {
+        driveLoaded = true;
+        driveWhere.textContent = 'Loading your Google Drive folder…';
+        api('GET', '/api/drive').then(function (d) {
+            driveList.innerHTML = '';
+            if (!d.enabled) {
+                driveWhere.innerHTML = 'Google Drive is not connected. In the Colab notebook, tick <b>USE_GOOGLE_DRIVE</b> in step 1 and run step 4 again.';
+                return;
+            }
+            driveWhere.innerHTML = 'Put <b>.blend</b> or <b>.zip</b> files in <b>' + esc(d.folder) + '</b> on Google Drive. A .blend renders right there, so textures next to it work without zipping. New files can take a minute to show up.';
+            if (!d.files.length) driveList.appendChild(make('p', 'empty', 'No .blend or .zip files there yet.'));
+            d.files.forEach(function (f) {
+                var row = make('label', 'drive-file'), radio = make('input');
+                radio.type = 'radio';
+                radio.name = 'drive_file';
+                radio.value = f.path;
+                radio.checked = f.path === drivePick;
+                radio.addEventListener('change', function () { drivePick = f.path; syncSource(); });
+                var where = f.path.indexOf('/') === -1 ? '' : f.path.slice(0, f.path.lastIndexOf('/')) + ' · ';
+                row.appendChild(radio);
+                row.appendChild(make('span', 'drive-name', f.name));
+                row.appendChild(make('span', 'drive-meta', where + size(f.size) + ' · ' + new Date(f.mtime * 1000).toLocaleString()));
+                driveList.appendChild(row);
+            });
+            if (!d.files.some(function (f) { return f.path === drivePick; })) drivePick = null;
+            syncSource();
+        }).catch(function (err) {
+            driveLoaded = false;
+            driveWhere.textContent = 'Could not read Google Drive: ' + err.message;
+        });
+    }
+    function make(tag, cls, text) {
+        var el = document.createElement(tag);
+        el.className = cls;
+        if (text !== undefined) el.textContent = text;
+        return el;
+    }
+    Array.prototype.forEach.call(form.querySelectorAll('input[name=src]'), function (r) {
+        r.addEventListener('change', function () { showMsg(''); syncSource(); });
+    });
+    document.getElementById('drive-refresh').addEventListener('click', loadDrive);
+    driveUrl.addEventListener('input', syncSource);
+    syncSource();
+
     // Every visible setting; empty boxes and "From file" are left out so the .blend's value is kept.
     function options() {
         var o = {};
@@ -114,6 +173,8 @@
         });
         o.compositing = { mode: o.comp_mode };
         delete o.comp_mode;
+        delete o.src;
+        delete o.drive_file;
         return o;
     }
 
@@ -157,7 +218,25 @@
 
     form.addEventListener('submit', function (e) {
         e.preventDefault();
-        if (!chosen || uploading) return;
+        if (uploading) return;
+        if (source() !== 'upload') {  // the server fetches the file itself
+            var body = source() === 'drive' ? { drive_path: drivePick } : { drive_url: driveUrl.value.trim() };
+            body.options = options();
+            uploading = true;
+            syncSource();
+            showMsg('');
+            api('POST', '/api/jobs', body).then(function () {
+                if (source() === 'link') driveUrl.value = '';
+                poll(true);
+            }).catch(function (err) {
+                showMsg(err.message, true);
+            }).then(function () {
+                uploading = false;
+                syncSource();
+            });
+            return;
+        }
+        if (!chosen) return;
         uploading = true;
         goBtn.disabled = true;
         upBox.hidden = false;
@@ -184,15 +263,15 @@
             showMsg(err.message, true);
         }).then(function () {
             uploading = false;
-            goBtn.disabled = !chosen;
+            syncSource();
             setTimeout(function () { if (!uploading) upBox.hidden = true; upFill.style.width = '0'; }, 1200);
         });
     });
 
     // ---- Job list ----------------------------------------------------------------
     var cards = {};
-    var STATUS = { queued: 'Queued', running: 'Rendering', compositing: 'Compositing', encoding: 'Making MP4', done: 'Done', failed: 'Failed', cancelled: 'Cancelled' };
-    var BUSY = ['queued', 'running', 'compositing', 'encoding'];
+    var STATUS = { preparing: 'Getting file', queued: 'Queued', running: 'Rendering', compositing: 'Compositing', encoding: 'Making MP4', done: 'Done', failed: 'Failed', cancelled: 'Cancelled' };
+    var BUSY = ['preparing', 'queued', 'running', 'compositing', 'encoding'];
 
     // v changes each time the frames are composited again, so the browser doesn't show old copies.
     function fileUrl(job, name, dl) {
@@ -297,6 +376,7 @@
         el.querySelector('.bar-fill').style.width = (job.progress * 100).toFixed(1) + '%';
 
         var stats = [];
+        if (job.status === 'preparing' && job.fetch) stats.push(esc(job.fetch));
         if (job.frames_total) stats.push('Frames <b>' + job.frames_done + '/' + job.frames_total + '</b>');
         if (job.status === 'running' && job.frame !== null) stats.push('Frame <b>' + job.frame + '</b>');
         if (job.status === 'running' && job.samples[1]) stats.push('Sample <b>' + job.samples[0] + '/' + job.samples[1] + '</b>');

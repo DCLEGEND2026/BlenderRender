@@ -1,5 +1,6 @@
 """Render jobs: one render at a time (Colab has one GPU), plus a second queue for
-re-running the compositing nodes on frames that are already rendered."""
+re-running the compositing nodes on frames that are already rendered. A job's file
+comes from an upload, the mounted Google Drive folder, or a Google Drive link."""
 import json
 import os
 import queue
@@ -7,6 +8,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -22,6 +24,8 @@ RE_SAMPLE = re.compile(r"Sample (\d+)\s*/\s*(\d+)")
 RE_SAMPLE_ALT = re.compile(r"Rendering (\d+) / (\d+) samples")
 RE_REMAINING = re.compile(r"Remaining:\s*([\d:.]+)")
 RE_SAVED = re.compile(r"Saved: '(.+?)'")
+# gdown's progress bar: " 45%|████▌     | 1.23G/2.70G [00:10<00:12, 120MB/s]"
+RE_DOWNLOAD = re.compile(r"(\d+)%\|[^|]*\|\s*([\d.]+\s*\w*)/([\d.]+\s*\w*)\s*\[[^,\]]*(?:,\s*([^\]]+))?\]")
 
 IMAGE_EXT = {"PNG": ".png", "JPEG": ".jpg", "OPEN_EXR": ".exr"}
 
@@ -38,7 +42,7 @@ class Job:
         self.name = name
         self.opts = opts
         self.blend = None
-        self.status = "queued"  # queued, running, compositing, encoding, done, failed, cancelled
+        self.status = "queued"  # preparing, queued, running, compositing, encoding, done, failed, cancelled
         self.error = ""
         self.created = time.time()
         self.started = None
@@ -47,6 +51,7 @@ class Job:
         self.frame = None
         self.samples = (0, 0)
         self.remaining = ""
+        self.fetch = ""  # while preparing: what is happening to the file (download progress)
         self.saved = []
         self.raw = []
         self.version = 0  # bumped each time the frames are composited, so the page reloads them
@@ -110,6 +115,7 @@ class Job:
             "frames_total": self.total_frames(),
             "samples": list(self.samples),
             "remaining": self.remaining,
+            "fetch": self.fetch,
             "progress": round(self.progress(), 4),
             "outputs": [os.path.basename(p) for p in self.saved],
             "video": self.video,
@@ -143,16 +149,36 @@ class JobManager:
         except Exception as e:
             shutil.rmtree(job.dir, ignore_errors=True)
             raise ValueError(str(e))
-        with self.lock:
-            self.jobs[job.id] = job
-            self.order.insert(0, job.id)
+        self._add(job)
         self.queue.put(job.id)
+        return job
+
+    def create_from_drive(self, path, opts):
+        """A file in the mounted Google Drive folder. A .blend renders right where it is,
+        so textures next to it on Drive are found; a .zip is unpacked here first."""
+        name = os.path.basename(path)
+        job = Job(self.jobs_dir, name, opts)
+        if name.lower().endswith(".blend"):
+            job.blend = path
+            job.log("Rendering %s from Google Drive" % path)
+            self._add(job)
+            self.queue.put(job.id)
+        else:
+            job.fetch = "Unpacking the zip from Google Drive"
+            self._prepare(job, lambda: self._unpack(path, name, job.input_dir, keep=True))
+        return job
+
+    def create_from_link(self, url, folder, opts):
+        """Download a Google Drive file (or folder) with gdown, then render it."""
+        job = Job(self.jobs_dir, "Google Drive " + ("folder" if folder else "file"), opts)
+        job.fetch = "Starting download"
+        self._prepare(job, lambda: self._download(job, url, folder))
         return job
 
     def recomposite(self, job_id, compositing):
         """Run new compositing nodes on a finished render's raw frames (no re-render)."""
         job = self.jobs.get(job_id)
-        if job.status in ("queued", "running", "compositing", "encoding"):
+        if job.status in ("preparing", "queued", "running", "compositing", "encoding"):
             raise ValueError("This render is still busy")
         if not job.raw:
             raise ValueError("This render has no raw frames to composite. Render it with Custom nodes first.")
@@ -172,8 +198,10 @@ class JobManager:
         job = self.jobs.get(job_id)
         if not job:
             return False
-        if job.status == "queued":
+        if job.status in ("queued", "preparing"):
             job.status = "cancelled"
+            if job.proc:  # a download
+                self._kill(job.proc)
         elif job.status in ("running", "compositing", "encoding") and job.proc:
             job.status = "cancelled"
             self._kill(job.proc)
@@ -202,13 +230,119 @@ class JobManager:
         return path
 
     # ---- internals -----------------------------------------------------------
+    def _add(self, job):
+        with self.lock:
+            self.jobs[job.id] = job
+            self.order.insert(0, job.id)
+
+    def _prepare(self, job, get_blend):
+        """Get the job's file ready in the background (downloads can take minutes), then queue it."""
+        job.status = "preparing"
+        self._add(job)
+
+        def run():
+            try:
+                blend = get_blend()
+                if job.status != "preparing":
+                    return  # cancelled meanwhile
+                job.blend = blend
+                job.fetch = ""
+                job.status = "queued"
+                self.queue.put(job.id)
+            except Exception as e:
+                if job.status == "preparing":
+                    job.status = "failed"
+                    job.fetch = ""
+                    job.error = str(e)
+                    job.finished = time.time()
+            finally:
+                job.proc = None
+        threading.Thread(target=run, daemon=True).start()
+
+    def _download(self, job, url, folder):
+        dl_dir = os.path.join(job.dir, "download")
+        os.makedirs(dl_dir)
+        try:
+            return self._fetch(job, url, folder, dl_dir)
+        finally:
+            shutil.rmtree(dl_dir, ignore_errors=True)  # partial downloads too: Colab's disk is small
+
+    def _fetch(self, job, url, folder, dl_dir):
+        cmd = [sys.executable, "-m", "gdown"] + (["--folder"] if folder else []) + [url, "-O", dl_dir + os.sep]
+        job.log("$ " + " ".join(cmd))
+        job.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    start_new_session=True)
+        # The progress bar redraws itself with \r, so split on that as well as \n.
+        buf, said = b"", []
+        while True:
+            chunk = job.proc.stdout.read1(4096)
+            if not chunk:
+                break
+            buf += chunk
+            parts = re.split(rb"[\r\n]", buf)
+            buf = parts.pop()
+            for part in parts:
+                line = part.decode("utf-8", "replace").strip()
+                if not line:
+                    continue
+                m = RE_DOWNLOAD.search(line)
+                if m:
+                    pct, done, total, speed = m.groups()
+                    job.fetch = "Downloading %s%% · %sB of %sB%s" % (
+                        pct, done, total, " · " + speed if speed and not speed.startswith("?") else "")
+                else:
+                    job.log(line)
+                    said.append(line)
+        code = job.proc.wait()
+        if job.status != "preparing":
+            return None
+        if code != 0:
+            raise ValueError(self._download_error(said, code))
+        job.fetch = "Unpacking"
+        items = [n for n in os.listdir(dl_dir) if not n.startswith(".")]
+        if len(items) == 1 and os.path.isfile(os.path.join(dl_dir, items[0])):
+            job.name = items[0]
+            return self._unpack(os.path.join(dl_dir, items[0]), items[0], job.input_dir)
+        for name in items:  # a folder: the .blend and its textures
+            shutil.move(os.path.join(dl_dir, name), os.path.join(job.input_dir, name))
+        blend = self._find_blend(job.input_dir, "No .blend file found in the Drive folder")
+        job.name = os.path.basename(blend)
+        return blend
+
     @staticmethod
-    def _unpack(upload_path, filename, dest):
-        """Put the upload in dest and return the .blend to render."""
+    def _download_error(said, code):
+        """A short reason from gdown's (multi-line) error output."""
+        text = " ".join(said)
+        if "Anyone with the link" in text or "many accesses" in text:
+            return ("Google Drive wouldn't hand over the file. Share it as 'Anyone with the link' and try "
+                    "again. If it is shared already, Google may be limiting downloads of it for a while: "
+                    "put a copy in your own Drive folder instead.")
+        if "404" in text:
+            return "Google Drive says that file doesn't exist. Check the link."
+        skip = ("To report issues", "Check FAQ", "Error:", "Using cookies", "warning:", "Retrieving folder")
+        reason = next((s for s in said if not s.startswith(skip)), "gdown exited with code %d" % code)
+        return "Google Drive download failed: " + reason
+
+    @staticmethod
+    def _find_blend(dest, missing):
+        blends = []
+        for base, dirs, files in os.walk(dest):
+            dirs[:] = [d for d in dirs if d != "__MACOSX"]
+            for f in files:
+                if f.lower().endswith(".blend"):
+                    p = os.path.join(base, f)
+                    blends.append((p.count(os.sep), p))
+        if not blends:
+            raise ValueError(missing)
+        return sorted(blends)[0][1]  # the one closest to the top
+
+    @classmethod
+    def _unpack(cls, upload_path, filename, dest, keep=False):
+        """Put the file in dest and return the .blend to render. keep leaves the source alone."""
         low = filename.lower()
         if low.endswith(".blend"):
             target = os.path.join(dest, os.path.basename(filename))
-            shutil.move(upload_path, target)
+            (shutil.copy2 if keep else shutil.move)(upload_path, target)
             return target
         if low.endswith(".zip"):
             with zipfile.ZipFile(upload_path) as z:
@@ -218,18 +352,10 @@ class JobManager:
                     if not out.startswith(root + os.sep) and out != root:
                         raise ValueError("Zip contains an unsafe path: %s" % m.filename)
                 z.extractall(dest)
-            os.remove(upload_path)
-            blends = []
-            for base, dirs, files in os.walk(dest):
-                dirs[:] = [d for d in dirs if d != "__MACOSX"]
-                for f in files:
-                    if f.lower().endswith(".blend"):
-                        p = os.path.join(base, f)
-                        blends.append((p.count(os.sep), p))
-            if not blends:
-                raise ValueError("No .blend file found inside the zip")
-            return sorted(blends)[0][1]  # the one closest to the top of the zip
-        raise ValueError("Upload a .blend file, or a .zip with the .blend and its textures")
+            if not keep:
+                os.remove(upload_path)
+            return cls._find_blend(dest, "No .blend file found inside the zip")
+        raise ValueError("Use a .blend file, or a .zip with the .blend and its textures")
 
     @staticmethod
     def _kill(proc):
