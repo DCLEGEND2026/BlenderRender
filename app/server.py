@@ -7,6 +7,7 @@ Settings come from environment variables (the Colab notebook sets them):
   PORT          port to listen on                        (default: 5000)
 """
 import hmac
+import io
 import os
 import re
 import shutil
@@ -16,6 +17,7 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, sen
 
 import compositing
 from jobs import JobManager
+from preview import Previewer
 
 BLENDER_BIN = os.environ.get("BLENDER_BIN", "blender")
 JOBS_DIR = os.path.abspath(os.environ.get("JOBS_DIR", "jobs"))
@@ -31,6 +33,7 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = CHUNK_MAX + 1024 * 1024
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 jobs = JobManager(JOBS_DIR, BLENDER_BIN)
+previewer = Previewer(BLENDER_BIN)
 
 
 # ---- Login -----------------------------------------------------------------------
@@ -67,7 +70,14 @@ def healthz():
 
 @app.route("/")
 def index():
-    return render_template("index.html", comp_nodes=compositing.catalog())
+    return render_template("index.html")
+
+
+@app.route("/compositor/<job_id>")
+def compositor(job_id):
+    job = get_job(job_id)
+    return render_template("compositor.html", job_id=job.id, job_name=job.name,
+                           comp_nodes=compositing.catalog(), default_graph=compositing.default_graph())
 
 
 # ---- System info -----------------------------------------------------------------
@@ -222,11 +232,35 @@ def job_delete(job_id):
     return jsonify(ok=True)
 
 
+@app.route("/api/jobs/<job_id>/preview", methods=["POST"])
+def job_preview(job_id):
+    """The graph applied to one raw frame, shrunk for speed unless size is "full"."""
+    job = get_job(job_id)
+    raw = sorted(job.raw)
+    if not raw:
+        return jsonify(error="No rendered frames yet"), 400
+    body = request.get_json(silent=True) or {}
+    frame = int_or_none(body.get("frame"), 0, len(raw) - 1) or 0
+    graph = compositing.clean_graph(body.get("graph"))
+    out_dir = os.path.join(job.dir, "preview")
+    os.makedirs(out_dir, exist_ok=True)
+    try:
+        path = previewer.render(raw[frame], job.info, graph, out_dir, 0 if body.get("size") == "full" else 960)
+    except RuntimeError as e:
+        return jsonify(error=str(e)), 500
+    if path is None:
+        return "", 204  # nothing plugged into the output
+    with open(path, "rb") as f:
+        data = io.BytesIO(f.read())
+    os.remove(path)
+    return send_file(data, mimetype="image/png", max_age=0)
+
+
 @app.route("/api/jobs/<job_id>/composite", methods=["POST"])
 def job_composite(job_id):
     get_job(job_id)
     body = request.get_json(silent=True) or {}
-    comp = compositing.clean({"mode": "custom", "nodes": body.get("nodes")})
+    comp = compositing.clean({"mode": "custom", "graph": body.get("graph")})
     try:
         job = jobs.recomposite(job_id, comp)
     except ValueError as e:
@@ -253,6 +287,7 @@ def job_zip(job_id):
 @app.errorhandler(400)
 @app.errorhandler(404)
 @app.errorhandler(413)
+@app.errorhandler(500)
 def json_error(e):
     if request.path.startswith("/api/"):
         return jsonify(error=getattr(e, "description", str(e))), e.code

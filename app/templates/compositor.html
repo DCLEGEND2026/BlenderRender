@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Compositor · {{ job_name }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='compositor.css') }}">
+</head>
+<body class="ce-page" data-job="{{ job_id }}">
+<header class="bar ce-bar">
+  <a class="btn sm ghost" href="/">← Renders</a>
+  <div class="ce-title"><b>Compositor</b><span>{{ job_name }}</span></div>
+  <div class="ce-tools">
+    <button type="button" class="btn sm" id="add-btn" title="Add a node (Shift+A)">Add node</button>
+    <button type="button" class="btn sm ghost" id="undo" title="Undo (Ctrl+Z)">Undo</button>
+    <button type="button" class="btn sm ghost" id="redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+    <button type="button" class="btn sm primary" id="apply" title="Composite every frame at full size and update the render's files">Apply to render</button>
+  </div>
+</header>
+
+<main class="ce">
+  <section class="ce-canvas" id="canvas" tabindex="0" aria-label="Node editor">
+    <div class="ce-world" id="world">
+      <svg class="ce-wires" id="wires" aria-hidden="true"></svg>
+    </div>
+    <div class="ce-zoom">
+      <button type="button" class="cnode-btn" data-zoom="1.2" title="Zoom in">+</button>
+      <button type="button" class="cnode-btn" data-zoom="0.83" title="Zoom out">−</button>
+      <button type="button" class="cnode-btn" id="fit" title="Frame all nodes (Home)">⤢</button>
+    </div>
+    <p class="ce-help">Shift+A add · drag from a socket to connect · drop a node on a wire to insert it · X delete · M mute · Shift+D duplicate · Ctrl+Shift+click preview a node</p>
+    <div class="ce-menu" id="menu" hidden>
+      <input type="search" id="menu-search" placeholder="Search nodes…" autocomplete="off">
+      <div class="ce-menu-list" id="menu-list"></div>
+    </div>
+    <div class="ce-cover" id="cover" hidden><p id="cover-text"></p></div>
+  </section>
+
+  <aside class="ce-preview">
+    <div class="ce-preview-head">
+      <b>Preview</b>
+      <span class="ce-badge" id="viewer-badge" hidden>Viewer</span>
+      <label class="ce-frame" id="frame-box" hidden>Frame <input type="range" id="frame" min="0" value="0"> <span id="frame-num"></span></label>
+      <select id="size" title="Preview size">
+        <option value="fast">Fast (960 px)</option>
+        <option value="full">Full size</option>
+      </select>
+    </div>
+    <div class="ce-image">
+      <img id="pimg" alt="Compositing preview" hidden>
+      <p class="ce-pmsg" id="pmsg">Loading…</p>
+    </div>
+    <p class="ce-pstat" id="pstat"></p>
+    <p class="msg" id="msg" hidden></p>
+  </aside>
+</main>
+
+<script id="comp-nodes" type="application/json">{{ comp_nodes|tojson }}</script>
+<script id="default-graph" type="application/json">{{ default_graph|tojson }}</script>
+<script src="{{ url_for('static', filename='compositor.js') }}"></script>
+</body>
+</html>

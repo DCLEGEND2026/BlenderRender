@@ -47,26 +47,36 @@ Any box left empty (or set to *From file*) keeps the value saved in the `.blend`
 
 ## Compositing
 
-Pick **Custom nodes** to build your own chain of real Blender compositor nodes on
-the page: *Render result → your nodes → Output*. Add nodes from the list, set their
-values, reorder them with the arrows, or untick a node to skip it.
+Pick **Custom nodes** under *Compositing* before you render. When frames are done,
+press **Open compositor** on the render: it opens a node editor like Blender's, with
+a live preview next to it that updates as you change anything.
+
+- **Shift+A** (or *Add node*) adds a node; type to search. After Shift+A the node
+  follows the mouse until you click, and dropping it on a wire puts it in between.
+- Drag from an output socket to an input socket to connect them; drag a wire off an
+  input to move or remove it. Drag the background to pan, scroll to zoom, **Home** to
+  frame all nodes.
+- **X**/Delete removes the selected nodes (the wire is kept going past them),
+  **M** mutes, **Shift+D** duplicates, **Ctrl+Z**/**Ctrl+Shift+Z** undo and redo.
+- **Ctrl+Shift+click** a node to see it through a Viewer node in the preview.
+- Number fields work like Blender's: drag sideways to change (Shift for fine steps),
+  click to type a value.
+- **Apply to render** composites every frame at full size and remakes the MP4.
 
 | Group | Nodes |
 | --- | --- |
-| Color | Exposure, Brightness/Contrast, Hue/Saturation/Value, Color Balance, Color Correction, Mix (color), Posterize, Invert Color |
-| Filter | Glare, Blur, Denoise, Filter (sharpen, soften, edges…), Kuwahara, Pixelate |
-| Lens & transform | Lens Distortion, Vignette, Flip, Rotate |
+| Input / output | Render Result, RGB, Value, Composite, Viewer |
+| Color | Exposure, Brightness/Contrast, Hue/Saturation/Value, Color Balance, Color Correction, Mix, Alpha Over, Posterize, Invert Color, RGB to BW |
+| Filter | Glare, Blur, Denoise, Filter (sharpen, soften, edges…), Kuwahara, Pixelate, Vignette |
+| Mask | Ellipse Mask, Box Mask, Dilate/Erode |
+| Converter | Math |
+| Distort | Lens Distortion, Transform, Rotate, Flip |
 
-With custom nodes the frames are first rendered as linear EXR, and then the nodes run
-over them. So once a render is done you can press **Edit compositing** on it, change
-the nodes and press **Apply to render**: only the compositor runs again (usually a
-second or two per frame), not the render. The MP4 is remade too. Custom nodes replace
-the compositing saved in the `.blend`; pick *As in file* to use the file's own nodes.
-Glare's *Sun Beams* type needs Blender 5.
-
-Each render shows live progress (frame, samples, time left), a preview of every
-frame, the Blender log, and buttons to download a zip of all the frames or the MP4.
-Renders run one at a time, in the order they were uploaded.
+How it works: with custom nodes the frames are first rendered as linear EXR. The
+preview keeps one Blender running that composites a smaller copy of the frame with
+your nodes (a few hundredths of a second each), so nothing is ever rendered again.
+Custom nodes replace the compositing saved in the `.blend`; pick *As in file* to use
+the file's own nodes. Glare's *Sun Beams* type needs Blender 5.
 
 ## Good to know
 
@@ -85,10 +95,13 @@ BlenderRender.ipynb    Colab notebook: installs Blender, starts the site and the
 app/server.py          Flask website + JSON API (login, chunked upload, jobs, files)
 app/jobs.py            Render queue: runs Blender, reads progress, makes zip / MP4
 app/blender_setup.py   Runs inside Blender: applies options, turns on the GPU
-app/compositing.py     The compositing nodes the page offers (shared by server and Blender)
-app/blender_composite.py  Runs inside Blender: adds the compositing nodes to the rendered frames
-app/templates/         index.html (upload + renders) and login.html
-app/static/            app.js and style.css
+app/compositing.py     The compositing nodes on offer, and the check for graphs from the page
+app/preview.py         Keeps one Blender running for the compositor's live preview
+app/blender_nodes.py   Runs inside Blender: builds a compositing graph as real nodes
+app/blender_composite.py  Runs inside Blender: composites every rendered frame at full size
+app/blender_preview.py    Runs inside Blender: answers preview requests from preview.py
+app/templates/         index.html (upload + renders), compositor.html and login.html
+app/static/            app.js, compositor.js and their CSS
 ```
 
 ### Run it on your own machine

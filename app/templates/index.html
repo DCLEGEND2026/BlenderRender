@@ -146,8 +146,7 @@
         </div>
         <p class="hint wide" data-comp="file">Uses the compositing nodes saved in the .blend, if it has any.</p>
         <p class="hint wide" data-comp="off" hidden>Saves the plain render and skips the file's compositing nodes.</p>
-        <p class="hint wide" data-comp="custom" hidden>Chain Blender compositor nodes after the render. They replace the file's own compositing, and you can change them after the render without rendering again.</p>
-        <div class="comp wide" id="comp" data-comp="custom" hidden></div>
+        <p class="hint wide" data-comp="custom" hidden>Build your own Blender compositor nodes with a live preview: once frames are rendered, press <b>Open compositor</b> on the render. They replace the file's own compositing, and changing them never needs a re-render.</p>
       </div>
 
       <div class="actions">
@@ -182,18 +181,10 @@
     <div class="job-actions">
       <a class="btn sm" data-act="zip" hidden>Download all (.zip)</a>
       <a class="btn sm" data-act="video" hidden>Download MP4</a>
-      <button type="button" class="btn sm" data-act="comp" hidden>Edit compositing</button>
+      <a class="btn sm" data-act="comp" hidden>Open compositor</a>
       <button type="button" class="btn sm" data-act="cancel" hidden>Cancel</button>
       <button type="button" class="btn sm ghost" data-act="log">Show log</button>
       <button type="button" class="btn sm ghost" data-act="delete">Delete</button>
-    </div>
-    <div class="job-comp" hidden>
-      <div class="comp"></div>
-      <div class="job-comp-actions">
-        <button type="button" class="btn sm primary" data-act="comp-apply">Apply to render</button>
-        <span class="hint">Runs only the compositor on the saved render, no re-render.</span>
-      </div>
-      <p class="msg err" hidden></p>
     </div>
     <video class="job-video" controls preload="metadata" hidden></video>
     <div class="gallery"></div>
@@ -201,7 +192,6 @@
   </article>
 </template>
 
-<script id="comp-nodes" type="application/json">{{ comp_nodes|tojson }}</script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>
