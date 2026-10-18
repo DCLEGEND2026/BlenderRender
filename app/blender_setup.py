@@ -1,6 +1,8 @@
-# Runs inside Blender (blender -b scene.blend -P blender_setup.py -- <options.json> <info.json>).
+# Runs inside Blender (blender -b scene.blend -P blender_setup.py -- <options.json> <info.json> [raw]).
 # Applies the render options chosen on the website, turns on the GPU for Cycles,
-# and writes scene info (frame range, fps, resolution) for the server to read.
+# and writes scene info (frame range, fps, resolution, color settings) for the server.
+# With "raw" the frames are saved as linear EXR without the file's compositing, for
+# blender_composite.py to add the website's compositing nodes afterwards.
 import json
 import sys
 
@@ -9,6 +11,7 @@ import bpy
 argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 opts = json.load(open(argv[0])) if argv else {}
 info_path = argv[1] if len(argv) > 1 else None
+raw = len(argv) > 2 and argv[2] == "raw"
 
 scene = bpy.context.scene
 render = scene.render
@@ -123,12 +126,32 @@ if opts.get("resolution_pct"):
     render.resolution_percentage = int(opts["resolution_pct"])
 
 fmt = opts.get("format", "PNG")
-render.image_settings.file_format = fmt
+image = render.image_settings
+image.file_format = fmt
 if fmt == "JPEG":
-    render.image_settings.quality = 92
+    image.quality = 92
+final_image = {"color_mode": image.color_mode, "color_depth": image.color_depth}
 render.use_file_extension = True
 render.use_overwrite = True
 render.use_placeholder = False
+
+# ---- Compositing -----------------------------------------------------------------
+if hasattr(render, "compositor_device"):
+    render.compositor_device = "CPU"  # the GPU compositor needs a display
+comp = opts.get("compositing", {}).get("mode", "file")
+if comp == "off":
+    render.use_compositing = False
+    log("Compositing: off")
+elif raw:
+    # The website's nodes are added later on these frames, so the look can change without a re-render.
+    render.use_compositing = False
+    image.file_format = "OPEN_EXR"
+    image.color_mode = "RGBA"
+    image.color_depth = "16"
+    image.exr_codec = "ZIP"
+    log("Compositing: website nodes, rendering raw EXR frames first")
+else:
+    log("Compositing: as in file (%s)" % ("on" if render.use_compositing else "off"))
 
 # Report textures the .blend points at but that were not uploaded.
 try:
@@ -148,4 +171,12 @@ if info_path:
             "height": int(render.resolution_y * render.resolution_percentage / 100),
             "scene": scene.name,
             "blender": bpy.app.version_string,
+            # For blender_composite.py, so composited frames look like a direct render.
+            "image": final_image,
+            "display": {"display_device": scene.display_settings.display_device},
+            "view": {k: getattr(scene.view_settings, k) for k in (
+                "view_transform", "look", "exposure", "gamma",
+                "use_white_balance", "white_balance_temperature", "white_balance_tint")
+                if hasattr(scene.view_settings, k)},
+            "dither": render.dither_intensity,
         }, f)

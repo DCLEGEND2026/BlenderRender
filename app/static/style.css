@@ -162,7 +162,7 @@ input:focus, select:focus { outline: 2px solid rgba(208, 138, 74, .5); outline-o
     background: #262b33;
     color: var(--muted);
 }
-.badge.running, .badge.encoding { color: var(--accent); }
+.badge.running, .badge.compositing, .badge.encoding { color: var(--accent); }
 .badge.done { color: var(--ok); }
 .badge.failed { color: var(--bad); }
 .job.done .bar-fill { background: var(--ok); }
@@ -198,6 +198,85 @@ input:focus, select:focus { outline: 2px solid rgba(208, 138, 74, .5); outline-o
 .shot.noimg { display: grid; place-items: center; min-height: 80px; color: var(--muted); font-size: 13px; }
 .shot.noimg span { position: static; background: none; }
 .more { grid-column: 1 / -1; }
+
+/* ---- Compositing nodes ---------------------------------------------------------- */
+.comp { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.comp-flow { display: flex; flex-direction: column; }
+.comp-flow > * { position: relative; margin: 0; }
+.comp-flow > * + * { margin-top: 14px; }
+.comp-flow > * + *::before {  /* the link between two nodes */
+    content: "";
+    position: absolute;
+    left: 20px;
+    top: -15px;
+    height: 14px;
+    border-left: 2px solid #3a414b;
+}
+.comp-end {
+    align-self: flex-start;
+    padding: 3px 12px;
+    border-radius: 999px;
+    background: #262b33;
+    color: var(--muted);
+    font-size: 12.5px;
+}
+.comp-empty { color: var(--muted); font-size: 13px; }
+.comp-add { max-width: 260px; }
+.cnode {
+    --node: #4a5059;
+    min-width: 0;
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--node);
+    border-radius: 8px;
+    background: #111418;
+}
+.cnode.g-color { --node: #a8963f; }   /* Blender's node header colors, muted */
+.cnode.g-filter { --node: #7d5aa6; }
+.cnode.g-lens { --node: #4a80a8; }
+.cnode-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+.cnode-head b { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; }
+.cnode-head input { width: 16px; height: 16px; accent-color: var(--accent); }
+.cnode-btn {
+    width: 28px;
+    height: 28px;
+    flex: none;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+}
+.cnode-btn:hover:not(:disabled) { background: #20252c; color: var(--text); }
+.cnode-btn:disabled { opacity: .35; cursor: default; }
+.cnode-hint { margin: -2px 10px 8px; color: var(--muted); font-size: 12.5px; }
+.cnode.muted { opacity: .55; }
+.cnode.muted .cnode-params, .cnode.muted .cnode-hint { display: none; }
+.cnode-params {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px 14px;
+    padding: 0 10px 12px;
+}
+.cparam { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cparam.check { flex-direction: row; height: 32px; }
+.cparam-num { display: flex; align-items: center; gap: 8px; }
+.cparam-num input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); }
+.cnode input[type=number], .cnode select { height: 32px; }
+.cparam-num input[type=number] { width: 84px; flex: none; }
+.cnode input[type=color] {
+    width: 100%;
+    height: 32px;
+    padding: 2px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #0f1215;
+    cursor: pointer;
+}
+.job-comp { display: flex; flex-direction: column; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.job-comp-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.job-comp-actions .hint, .job-comp .msg { margin: 0; }
 
 .log {
     margin: 0;

@@ -1,4 +1,5 @@
-"""Render jobs: one queue, one Blender process at a time (Colab has one GPU)."""
+"""Render jobs: one render at a time (Colab has one GPU), plus a second queue for
+re-running the compositing nodes on frames that are already rendered."""
 import json
 import os
 import queue
@@ -14,6 +15,7 @@ from collections import deque
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SETUP_SCRIPT = os.path.join(HERE, "blender_setup.py")
+COMPOSITE_SCRIPT = os.path.join(HERE, "blender_composite.py")
 
 RE_FRAME = re.compile(r"Fra:\s*(\d+)")
 RE_SAMPLE = re.compile(r"Sample (\d+)\s*/\s*(\d+)")
@@ -30,12 +32,13 @@ class Job:
         self.dir = os.path.join(jobs_dir, self.id)
         self.input_dir = os.path.join(self.dir, "input")
         self.output_dir = os.path.join(self.dir, "output")
+        self.raw_dir = os.path.join(self.dir, "raw")  # linear EXR frames before compositing
         os.makedirs(self.input_dir)
         os.makedirs(self.output_dir)
         self.name = name
         self.opts = opts
         self.blend = None
-        self.status = "queued"  # queued, running, encoding, done, failed, cancelled
+        self.status = "queued"  # queued, running, compositing, encoding, done, failed, cancelled
         self.error = ""
         self.created = time.time()
         self.started = None
@@ -45,13 +48,23 @@ class Job:
         self.samples = (0, 0)
         self.remaining = ""
         self.saved = []
+        self.raw = []
+        self.version = 0  # bumped each time the frames are composited, so the page reloads them
         self.video = None
         self.proc = None
         # Keep the start of the log (setup, GPU, warnings) and a rolling tail.
         self.log_head = []
         self.log_tail = deque(maxlen=300)
 
+    def custom_compositing(self):
+        return self.opts.get("compositing", {}).get("mode") == "custom"
+
     # ---- progress ------------------------------------------------------------
+    def frames_done(self):
+        if self.status == "running" and self.custom_compositing():
+            return len(self.raw)
+        return len(self.saved)
+
     def total_frames(self):
         if not self.info:
             return 0
@@ -60,11 +73,13 @@ class Job:
     def progress(self):
         if self.status in ("done", "encoding"):
             return 1.0
+        if self.status == "compositing":
+            return len(self.saved) / max(1, len(self.raw))
         total = self.total_frames()
         if not total:
             return 0.0
         part = self.samples[0] / self.samples[1] if self.samples[1] else 0.0
-        return min(1.0, (len(self.saved) + part) / total)
+        return min(1.0, (self.frames_done() + part) / total)
 
     def log(self, line):
         if len(self.log_head) < 60:
@@ -91,13 +106,15 @@ class Job:
             "elapsed": ((self.finished or time.time()) - self.started) if self.started else 0,
             "info": self.info,
             "frame": self.frame,
-            "frames_done": len(self.saved),
+            "frames_done": self.frames_done(),
             "frames_total": self.total_frames(),
             "samples": list(self.samples),
             "remaining": self.remaining,
             "progress": round(self.progress(), 4),
             "outputs": [os.path.basename(p) for p in self.saved],
             "video": self.video,
+            "version": self.version,
+            "raw_frames": len(self.raw),
         }
         if full:
             d["log"] = self.log_lines()
@@ -111,9 +128,12 @@ class JobManager:
         self.jobs = {}
         self.order = []
         self.queue = queue.Queue()
+        self.comp_queue = queue.Queue()
         self.lock = threading.Lock()
         os.makedirs(jobs_dir, exist_ok=True)
-        threading.Thread(target=self._worker, daemon=True).start()
+        threading.Thread(target=self._worker, args=(self.queue, self._render), daemon=True).start()
+        # Compositing runs on the CPU, so it doesn't have to wait for a render to finish.
+        threading.Thread(target=self._worker, args=(self.comp_queue, self._recomposite), daemon=True).start()
 
     # ---- public API ----------------------------------------------------------
     def create(self, upload_path, filename, opts):
@@ -129,6 +149,19 @@ class JobManager:
         self.queue.put(job.id)
         return job
 
+    def recomposite(self, job_id, compositing):
+        """Run new compositing nodes on a finished render's raw frames (no re-render)."""
+        job = self.jobs.get(job_id)
+        if job.status in ("queued", "running", "compositing", "encoding"):
+            raise ValueError("This render is still busy")
+        if not job.raw:
+            raise ValueError("This render has no raw frames to composite. Render it with Custom nodes first.")
+        job.opts = dict(job.opts, compositing=compositing)
+        job.status = "queued"
+        job.error = ""
+        self.comp_queue.put(job.id)
+        return job
+
     def get(self, job_id):
         return self.jobs.get(job_id)
 
@@ -141,7 +174,7 @@ class JobManager:
             return False
         if job.status == "queued":
             job.status = "cancelled"
-        elif job.status in ("running", "encoding") and job.proc:
+        elif job.status in ("running", "compositing", "encoding") and job.proc:
             job.status = "cancelled"
             self._kill(job.proc)
         return True
@@ -209,42 +242,41 @@ class JobManager:
             except Exception:
                 pass
 
-    def _worker(self):
+    def _worker(self, jobs_queue, handler):
         while True:
-            job_id = self.queue.get()
+            job_id = jobs_queue.get()
             job = self.jobs.get(job_id)
             if not job or job.status != "queued":
                 continue
             try:
-                self._run(job)
+                handler(job)
             except Exception as e:  # never let one job kill the worker
                 job.status = "failed"
                 job.error = str(e)
             finally:
-                job.finished = time.time()
                 job.proc = None
 
-    def _run(self, job):
-        job.status = "running"
-        job.started = time.time()
+    def _render(self, job):
+        try:
+            self._run(job)
+        finally:
+            job.finished = time.time()
+
+    def _paths(self, job):
         opts_path = os.path.join(job.dir, "options.json")
-        info_path = os.path.join(job.dir, "info.json")
         with open(opts_path, "w") as f:
             json.dump(job.opts, f)
+        return opts_path, os.path.join(job.dir, "info.json")
 
-        cmd = [
-            self.blender, "-b", "--factory-startup", job.blend,
-            "-P", SETUP_SCRIPT,
-            "-o", os.path.join(job.output_dir, "frame_####"),
-            "-a",
-            "--", opts_path, info_path,
-        ]
+    def _blender(self, job, cmd, info_path, cwd=None):
+        """Run Blender, following its output for progress; returns the exit code."""
         job.log("$ " + " ".join(cmd))
         job.proc = subprocess.Popen(
-            cmd, cwd=os.path.dirname(job.blend),
+            cmd, cwd=cwd,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, bufsize=1, errors="replace", start_new_session=True,
         )
+        out_dir, raw_dir = os.path.realpath(job.output_dir), os.path.realpath(job.raw_dir)
         for raw in job.proc.stdout:
             line = raw.rstrip()
             if not line:
@@ -265,18 +297,69 @@ class JobManager:
             if m:
                 job.remaining = m.group(1)
             m = RE_SAVED.search(line)
-            if m and os.path.realpath(os.path.dirname(m.group(1))) == os.path.realpath(job.output_dir):
-                job.saved.append(m.group(1))
+            if m:
+                where = os.path.realpath(os.path.dirname(m.group(1)))
+                if where == out_dir:
+                    job.saved.append(m.group(1))
+                elif where == raw_dir:
+                    job.raw.append(m.group(1))
                 job.samples = (0, 0)
-        code = job.proc.wait()
+        return job.proc.wait()
+
+    def _run(self, job):
+        job.status = "running"
+        job.started = time.time()
+        opts_path, info_path = self._paths(job)
+        custom = job.custom_compositing()
+        cmd = [
+            self.blender, "-b", "--factory-startup", job.blend,
+            "-P", SETUP_SCRIPT,
+            "-o", os.path.join(job.raw_dir if custom else job.output_dir, "frame_####"),
+            "-a",
+            "--", opts_path, info_path,
+        ] + (["raw"] if custom else [])
+        code = self._blender(job, cmd, info_path, cwd=os.path.dirname(job.blend))
 
         if job.status == "cancelled":
             return
-        if code != 0 or not job.saved:
+        if code != 0 or not (job.raw if custom else job.saved):
             job.status = "failed"
             job.error = self._last_error(job) or "Blender exited with code %d and saved no images" % code
             return
+        if custom:
+            self._composite(job)
+        self._finish(job)
 
+    def _recomposite(self, job):
+        self._composite(job)
+        self._finish(job)
+
+    def _composite(self, job):
+        """Add the website's compositing nodes to the raw frames. Nothing is rendered, so it is quick."""
+        job.status = "compositing"
+        job.version += 1
+        job.saved = []
+        if job.video:
+            job.video = None
+            try:
+                os.remove(os.path.join(job.output_dir, "video.mp4"))
+            except OSError:
+                pass
+        opts_path, info_path = self._paths(job)
+        cmd = [
+            self.blender, "-b", "--factory-startup",
+            "-P", COMPOSITE_SCRIPT,
+            "--", opts_path, info_path, job.raw_dir, job.output_dir,
+        ]
+        code = self._blender(job, cmd, info_path)
+        if job.status == "compositing" and (code != 0 or len(job.saved) < len(job.raw)):
+            job.status = "failed"
+            job.error = self._last_error(job) or "Compositing stopped with code %d" % code
+
+    def _finish(self, job):
+        """MP4 if asked for, then done (unless the job failed or was cancelled on the way)."""
+        if job.status not in ("running", "compositing"):
+            return
         if job.opts.get("video") and len(job.saved) > 1 and job.opts.get("format") != "OPEN_EXR":
             job.status = "encoding"
             self._encode(job)

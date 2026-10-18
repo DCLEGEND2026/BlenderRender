@@ -40,9 +40,29 @@ request limit doesn't apply.
 | Cycles: Max light bounces | Lower is faster; less light bouncing around the scene. |
 | Cycles: Denoise, Denoiser | Turn denoising on/off; OptiX (fast, on the GPU) or OpenImageDenoise. |
 | Eevee: Render samples, Ray tracing | Eevee's own quality settings. |
+| MP4 | Animations can also be encoded to an H.264 MP4 at the scene's frame rate. |
+| Compositing | *As in file*, *Off*, or *Custom nodes* (see below). |
 
 Any box left empty (or set to *From file*) keeps the value saved in the `.blend`.
-| MP4 | Animations can also be encoded to an H.264 MP4 at the scene's frame rate. |
+
+## Compositing
+
+Pick **Custom nodes** to build your own chain of real Blender compositor nodes on
+the page: *Render result → your nodes → Output*. Add nodes from the list, set their
+values, reorder them with the arrows, or untick a node to skip it.
+
+| Group | Nodes |
+| --- | --- |
+| Color | Exposure, Brightness/Contrast, Hue/Saturation/Value, Color Balance, Color Correction, Mix (color), Posterize, Invert Color |
+| Filter | Glare, Blur, Denoise, Filter (sharpen, soften, edges…), Kuwahara, Pixelate |
+| Lens & transform | Lens Distortion, Vignette, Flip, Rotate |
+
+With custom nodes the frames are first rendered as linear EXR, and then the nodes run
+over them. So once a render is done you can press **Edit compositing** on it, change
+the nodes and press **Apply to render**: only the compositor runs again (usually a
+second or two per frame), not the render. The MP4 is remade too. Custom nodes replace
+the compositing saved in the `.blend`; pick *As in file* to use the file's own nodes.
+Glare's *Sun Beams* type needs Blender 5.
 
 Each render shows live progress (frame, samples, time left), a preview of every
 frame, the Blender log, and buttons to download a zip of all the frames or the MP4.
@@ -65,6 +85,8 @@ BlenderRender.ipynb    Colab notebook: installs Blender, starts the site and the
 app/server.py          Flask website + JSON API (login, chunked upload, jobs, files)
 app/jobs.py            Render queue: runs Blender, reads progress, makes zip / MP4
 app/blender_setup.py   Runs inside Blender: applies options, turns on the GPU
+app/compositing.py     The compositing nodes the page offers (shared by server and Blender)
+app/blender_composite.py  Runs inside Blender: adds the compositing nodes to the rendered frames
 app/templates/         index.html (upload + renders) and login.html
 app/static/            app.js and style.css
 ```

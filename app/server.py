@@ -14,6 +14,7 @@ import subprocess
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, send_from_directory
 
+import compositing
 from jobs import JobManager
 
 BLENDER_BIN = os.environ.get("BLENDER_BIN", "blender")
@@ -66,7 +67,7 @@ def healthz():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", comp_nodes=compositing.catalog())
 
 
 # ---- System info -----------------------------------------------------------------
@@ -161,6 +162,8 @@ def clean_options(raw):
         # Eevee
         "eevee_samples": int_or_none(raw.get("eevee_samples"), 1, 65536),
         "eevee_raytracing": pick("eevee_raytracing", ("file", "on", "off"), "file"),
+        # As in file / off / the website's own node stack (see compositing.py)
+        "compositing": compositing.clean(raw.get("compositing")),
     }
     if mode == "still":
         opts["frame"] = int_or_none(raw.get("frame"), -1048574, 1048574)
@@ -217,6 +220,18 @@ def job_delete(job_id):
     get_job(job_id)
     jobs.delete(job_id)
     return jsonify(ok=True)
+
+
+@app.route("/api/jobs/<job_id>/composite", methods=["POST"])
+def job_composite(job_id):
+    get_job(job_id)
+    body = request.get_json(silent=True) or {}
+    comp = compositing.clean({"mode": "custom", "nodes": body.get("nodes")})
+    try:
+        job = jobs.recomposite(job_id, comp)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(job=job.to_dict())
 
 
 @app.route("/api/jobs/<job_id>/files/<path:name>")
