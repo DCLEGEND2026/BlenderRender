@@ -14,6 +14,7 @@ import time
 import uuid
 import zipfile
 from collections import deque
+from urllib.parse import urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SETUP_SCRIPT = os.path.join(HERE, "blender_setup.py")
@@ -124,6 +125,7 @@ class Job:
             "video": self.video,
             "version": self.version,
             "raw_frames": len(self.raw),
+            "has_file": bool(self.blend),  # can be rendered again
         }
         if full:
             d["log"] = self.log_lines()
@@ -171,11 +173,38 @@ class JobManager:
             self._prepare(job, lambda: self._unpack(path, name, job.input_dir, keep=True))
         return job
 
-    def create_from_link(self, url, folder, opts):
-        """Download a Google Drive file (or folder) with gdown, then render it."""
-        job = Job(self.jobs_dir, "Google Drive " + ("folder" if folder else "file"), opts)
+    def create_from_link(self, url, folder, drive, opts):
+        """Download a file (or a Google Drive folder) with gdown, then render it."""
+        name = ("Google Drive " + ("folder" if folder else "file")) if drive else \
+            "Download from " + (urlparse(url).hostname or "link")
+        job = Job(self.jobs_dir, name, opts)
         job.fetch = "Starting download"
-        self._prepare(job, lambda: self._download(job, url, folder))
+        self._prepare(job, lambda: self._download(job, url, folder, drive))
+        return job
+
+    def create_again(self, old, opts):
+        """Render an earlier render's file again with new settings."""
+        if not old.blend or not os.path.isfile(old.blend):
+            raise ValueError("The file of that render is gone, so it can't be rendered again. Add it again above.")
+        job = Job(self.jobs_dir, old.name, opts)
+        if not old.blend.startswith(old.input_dir + os.sep):  # rendered in place from Google Drive
+            job.blend = old.blend
+            job.log("Rendering %s again" % old.blend)
+            self._add(job)
+            self.queue.put(job.id)
+            return job
+
+        def copy():
+            # Hard links: instant and no extra disk, and deleting the old render doesn't touch them.
+            def link(src, dst):
+                try:
+                    os.link(src, dst)
+                except OSError:
+                    shutil.copy2(src, dst)
+            shutil.copytree(old.input_dir, job.input_dir, copy_function=link, dirs_exist_ok=True)
+            return os.path.join(job.input_dir, os.path.relpath(old.blend, old.input_dir))
+        job.fetch = "Getting the file of the earlier render"
+        self._prepare(job, copy)
         return job
 
     def recomposite(self, job_id, compositing):
@@ -262,15 +291,15 @@ class JobManager:
                 job.proc = None
         threading.Thread(target=run, daemon=True).start()
 
-    def _download(self, job, url, folder):
+    def _download(self, job, url, folder, drive):
         dl_dir = os.path.join(job.dir, "download")
         os.makedirs(dl_dir)
         try:
-            return self._fetch(job, url, folder, dl_dir)
+            return self._fetch(job, url, folder, drive, dl_dir)
         finally:
             shutil.rmtree(dl_dir, ignore_errors=True)  # partial downloads too: Colab's disk is small
 
-    def _fetch(self, job, url, folder, dl_dir):
+    def _fetch(self, job, url, folder, drive, dl_dir):
         cmd = [sys.executable, "-m", "gdown"] + (["--folder"] if folder else []) + [url, "-O", dl_dir + os.sep]
         job.log("$ " + " ".join(cmd))
         job.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -300,12 +329,13 @@ class JobManager:
         if job.status != "preparing":
             return None
         if code != 0:
-            raise ValueError(self._download_error(said, code))
+            raise ValueError(self._download_error(said, code, drive))
         job.fetch = "Unpacking"
         items = [n for n in os.listdir(dl_dir) if not n.startswith(".")]
         if len(items) == 1 and os.path.isfile(os.path.join(dl_dir, items[0])):
-            job.name = items[0]
-            return self._unpack(os.path.join(dl_dir, items[0]), items[0], job.input_dir)
+            name = self._name_by_content(dl_dir, items[0])
+            job.name = name
+            return self._unpack(os.path.join(dl_dir, name), name, job.input_dir)
         for name in items:  # a folder: the .blend and its textures
             shutil.move(os.path.join(dl_dir, name), os.path.join(job.input_dir, name))
         blend = self._find_blend(job.input_dir, "No .blend file found in the Drive folder")
@@ -313,9 +343,31 @@ class JobManager:
         return blend
 
     @staticmethod
-    def _download_error(said, code):
+    def _name_by_content(folder, name):
+        """Links like .../download?id=5 save a file without .blend or .zip: look inside."""
+        clean = name.split("?")[0] or "download"  # gdown can keep the link's ?query in the name
+        if clean != name:
+            os.rename(os.path.join(folder, name), os.path.join(folder, clean))
+            name = clean
+        if name.lower().endswith((".blend", ".zip")):
+            return name
+        with open(os.path.join(folder, name), "rb") as f:
+            head = f.read(4)
+        # .blend files start with "BLENDER", or are zstd / gzip compressed; zips start with "PK"
+        ext = ".blend" if head.startswith(b"BLEN") or head in (b"\x28\xb5\x2f\xfd",) or head[:2] == b"\x1f\x8b" else \
+            ".zip" if head[:2] == b"PK" else ""
+        if not ext:
+            raise ValueError("The link gave %s, which isn't a .blend or .zip file. Use a link that downloads "
+                             "the file itself, not a web page about it." % name)
+        os.rename(os.path.join(folder, name), os.path.join(folder, name + ext))
+        return name + ext
+
+    @staticmethod
+    def _download_error(said, code, drive=True):
         """A short reason from gdown's (multi-line) error output."""
         text = " ".join(said)
+        if not drive and ("404" in text or "403" in text):
+            return "Nothing could be downloaded from that link (%s). Check it." % ("404" if "404" in text else "403")
         if "Anyone with the link" in text or "many accesses" in text:
             return ("Google Drive wouldn't hand over the file. Share it as 'Anyone with the link' and try "
                     "again. If it is shared already, Google may be limiting downloads of it for a while: "
@@ -324,7 +376,7 @@ class JobManager:
             return "Google Drive says that file doesn't exist. Check the link."
         skip = ("To report issues", "Check FAQ", "Error:", "Using cookies", "warning:", "Retrieving folder")
         reason = next((s for s in said if not s.startswith(skip)), "gdown exited with code %d" % code)
-        return "Google Drive download failed: " + reason
+        return ("Google Drive download failed: " if drive else "Download failed: ") + reason
 
     @staticmethod
     def _find_blend(dest, missing):

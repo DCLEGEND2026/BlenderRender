@@ -13,7 +13,10 @@ Open the notebook, run it, and you get a link to a website where you upload a
 3. `REPO_URL` in step 1 already points at this repo. Change it only if you use your own fork.
 4. **Runtime → Run all**. Step 4 prints a link like
    `https://something.trycloudflare.com/login?key=...`.
-5. Open the link, drop in your file and press **Upload & render**.
+5. Open the link, drop in your file (or paste a link, or pick it from Google Drive) and
+   press **Render**.
+6. To change a setting and render the same file again, press **Render again** on the
+   render: the form gets its settings and file, so there's nothing to upload again.
 
 ## What you can upload
 
@@ -25,27 +28,34 @@ Open the notebook, run it, and you get a link to a website where you upload a
 Big files are fine: the page uploads in 32 MB pieces, so the tunnel's 100 MB
 request limit doesn't apply. For really big projects, use Google Drive instead (below).
 
-## Google Drive (faster for big files)
+## Google Drive and links (faster for big files)
 
 Uploading through the page sends the file over your internet connection and then
-through the tunnel, which is slow for big projects. Colab can read Google Drive
+through the tunnel, which is slow for big projects. Colab can fetch from Google Drive
 directly over Google's own network, so it's much faster to put the file there.
 
-**From your Drive folder.** With `USE_GOOGLE_DRIVE` on (step 1, the default), step 4
-asks you to connect your Google Drive and makes the folder `My Drive/BlenderRender`
-(change `DRIVE_FOLDER` to use another one). Put your `.blend` or `.zip` in that folder,
-or in a subfolder. On the website, pick **Google Drive**, choose the file and press
-**Render**.
+**Your Blend files folder.** With `USE_GOOGLE_DRIVE` on (step 1, the default), step 4
+asks you to connect your Google Drive and makes two folders in `My Drive/BlenderRender`
+(change `DRIVE_FOLDER` to use another name):
 
-- A `.blend` renders straight from Drive, so textures next to it (relative paths) work
-  without zipping anything.
-- A `.zip` is unpacked on the Colab machine. The zip in Drive is left alone.
-- A file you just added can take a minute to show up. Press **Refresh** on the list.
-- Step 5 copies your renders to `My Drive/BlenderRender/Renders`.
+- `Blend files`: upload your `.blend` or `.zip` here on drive.google.com (or put it in a
+  subfolder). The website lists these under *Or pick one from your Google Drive*; pick
+  one and press **Render**. The list updates when you come back to the tab, or press
+  **Refresh**. A file you just added can take a minute to show up.
+- `Renders`: step 5 copies your renders here.
 
-**From a share link.** Pick **Drive link** and paste the link to a `.blend`, a `.zip` or
-a whole folder. This works for anyone's file, as long as it's shared as *Anyone with
-the link*. Folder links download every file in the folder (Google allows up to 50).
+A `.blend` renders straight from Drive, so textures next to it (relative paths) work
+without zipping anything. A `.zip` is unpacked on the Colab machine, and the zip in
+Drive is left alone.
+
+**A link.** Paste a link in *Or paste a link to the .blend or .zip* and press **Render**:
+the file is downloaded and imported for you.
+
+- Google Drive links to a `.blend`, a `.zip` or a whole folder work for anyone's file,
+  as long as it's shared as *Anyone with the link*. Folder links download every file
+  in the folder (Google allows up to 50).
+- Any other direct download link works too (Dropbox share links are fixed up to
+  download the file).
 
 ## Render options
 
@@ -140,7 +150,7 @@ cd app
 BLENDER_BIN=/path/to/blender ACCESS_KEY=choose-a-key python server.py
 ```
 
-Set `DRIVE_DIR=/some/folder` as well to get the **Google Drive** list for any folder
-on your machine.
+Set `DRIVE_DIR=/some/folder` as well to get the *pick one from your Google Drive* list
+for any folder on your machine.
 
 Then open http://localhost:5000/login?key=choose-a-key.

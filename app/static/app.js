@@ -73,8 +73,15 @@
         drop.classList.add('has');
         dropMain.textContent = f.name;
         dropSub.textContent = size(f.size) + ' · click to choose another file';
-        syncSource();
+        use('upload');
         showMsg('');
+    }
+    function clearFile() {
+        chosen = null;
+        fileInput.value = '';
+        drop.classList.remove('has');
+        dropMain.innerHTML = 'Drop a <b>.blend</b> file here, or click to choose';
+        dropSub.textContent = 'Using textures that aren’t packed? Zip the .blend together with its texture folders and upload the .zip.';
     }
     fileInput.addEventListener('change', function () { setFile(fileInput.files[0]); });
     ['dragenter', 'dragover'].forEach(function (ev) {
@@ -103,31 +110,50 @@
     });
     syncForm();
 
-    // ---- Where the file comes from: upload, the mounted Google Drive folder, or a Drive link
+    // ---- Where the file comes from ------------------------------------------------
+    // An upload, a link, or a file in the Google Drive folder: choosing one clears the
+    // others. "Render again" on a render uses that render's file instead.
+    var linkInput = document.getElementById('link'), linkBox = document.getElementById('link-box');
     var driveList = document.getElementById('drive-list'), driveWhere = document.getElementById('drive-where');
-    var driveUrl = document.getElementById('drive-url');
-    var drivePick = null, driveLoaded = false;
+    var driveRefresh = document.getElementById('drive-refresh');
+    var againBox = document.getElementById('again'), sources = document.getElementById('sources');
+    var src = null, drivePick = null, again = null, driveBusy = false;
 
-    function source() { return form.src.value; }
-    function syncSource() {
-        var src = source();
-        Array.prototype.forEach.call(form.querySelectorAll('[data-src]'), function (el) {
-            el.hidden = el.dataset.src !== src;
-        });
-        goBtn.textContent = src === 'upload' ? 'Upload & render' : 'Render';
-        goBtn.disabled = uploading || !(src === 'upload' ? chosen : src === 'drive' ? drivePick : driveUrl.value.trim());
-        if (src === 'drive' && !driveLoaded) loadDrive();
+    function use(which) {
+        src = which;
+        if (which !== 'upload') clearFile();
+        if (which !== 'link') linkInput.value = '';
+        if (which !== 'drive') {
+            drivePick = null;
+            Array.prototype.forEach.call(driveList.querySelectorAll('input'), function (r) { r.checked = false; });
+        }
+        if (which !== 'again') again = null;
+        againBox.hidden = which !== 'again';
+        sources.hidden = which === 'again';
+        linkBox.classList.toggle('has', which === 'link');
+        syncSource();
     }
+    function syncSource() {
+        goBtn.textContent = src === 'upload' ? 'Upload & render' : 'Render';
+        goBtn.disabled = uploading || !src;
+    }
+    linkInput.addEventListener('input', function () {
+        if (linkInput.value.trim()) { if (src !== 'link') use('link'); }
+        else if (src === 'link') use(null);
+    });
+
     function loadDrive() {
-        driveLoaded = true;
-        driveWhere.textContent = 'Loading your Google Drive folder…';
+        if (driveBusy) return;
+        driveBusy = true;
         api('GET', '/api/drive').then(function (d) {
-            driveList.innerHTML = '';
+            driveRefresh.hidden = !d.enabled;
+            driveList.hidden = !d.enabled;
             if (!d.enabled) {
-                driveWhere.innerHTML = 'Google Drive is not connected. In the Colab notebook, tick <b>USE_GOOGLE_DRIVE</b> in step 1 and run step 4 again.';
+                driveWhere.innerHTML = 'Google Drive isn’t connected. In the Colab notebook, tick <b>USE_GOOGLE_DRIVE</b> in step 1 and run step 4 again.';
                 return;
             }
-            driveWhere.innerHTML = 'Put <b>.blend</b> or <b>.zip</b> files in <b>' + esc(d.folder) + '</b> on Google Drive. A .blend renders right there, so textures next to it work without zipping. New files can take a minute to show up.';
+            driveWhere.innerHTML = 'Put <b>.blend</b> or <b>.zip</b> files in <b>' + esc(d.folder) + '</b> from drive.google.com (much faster than uploading here). A .blend renders right from Drive, so textures next to it work without zipping. New files can take a minute to show up.';
+            driveList.innerHTML = '';
             if (!d.files.length) driveList.appendChild(make('p', 'empty', 'No .blend or .zip files there yet.'));
             d.files.forEach(function (f) {
                 var row = make('label', 'drive-file'), radio = make('input');
@@ -135,19 +161,17 @@
                 radio.name = 'drive_file';
                 radio.value = f.path;
                 radio.checked = f.path === drivePick;
-                radio.addEventListener('change', function () { drivePick = f.path; syncSource(); });
+                radio.addEventListener('change', function () { use('drive'); drivePick = f.path; radio.checked = true; showMsg(''); });
                 var where = f.path.indexOf('/') === -1 ? '' : f.path.slice(0, f.path.lastIndexOf('/')) + ' · ';
                 row.appendChild(radio);
                 row.appendChild(make('span', 'drive-name', f.name));
                 row.appendChild(make('span', 'drive-meta', where + size(f.size) + ' · ' + new Date(f.mtime * 1000).toLocaleString()));
                 driveList.appendChild(row);
             });
-            if (!d.files.some(function (f) { return f.path === drivePick; })) drivePick = null;
-            syncSource();
+            if (src === 'drive' && !d.files.some(function (f) { return f.path === drivePick; })) use(null);
         }).catch(function (err) {
-            driveLoaded = false;
             driveWhere.textContent = 'Could not read Google Drive: ' + err.message;
-        });
+        }).then(function () { driveBusy = false; });
     }
     function make(tag, cls, text) {
         var el = document.createElement(tag);
@@ -155,11 +179,31 @@
         if (text !== undefined) el.textContent = text;
         return el;
     }
-    Array.prototype.forEach.call(form.querySelectorAll('input[name=src]'), function (r) {
-        r.addEventListener('change', function () { showMsg(''); syncSource(); });
-    });
-    document.getElementById('drive-refresh').addEventListener('click', loadDrive);
-    driveUrl.addEventListener('input', syncSource);
+    driveRefresh.addEventListener('click', loadDrive);
+    // Back from adding files on drive.google.com in another tab: show them.
+    window.addEventListener('focus', function () { if (!driveRefresh.hidden) loadDrive(); });
+    loadDrive();
+
+    // "Render again": the form gets that render's settings and uses its file.
+    function startAgain(job) {
+        var o = job.opts;
+        Array.prototype.forEach.call(form.querySelectorAll('input[name], select[name]'), function (el) {
+            if (el.name === 'drive_file') return;
+            var v = el.name === 'comp_mode' ? (o.compositing || {}).mode : o[el.name];
+            var none = v === null || v === undefined;
+            if (el.type === 'radio') { if (!none) el.checked = el.value === String(v); }
+            else if (el.type === 'checkbox') el.checked = o.mode === 'animation' ? !!o.video : true;
+            else if (el.tagName === 'SELECT') el.value = none ? (el.querySelector('option[value=file]') ? 'file' : el.options[0].value) : String(v);
+            else el.value = none ? '' : v;
+        });
+        syncForm();
+        use('again');
+        again = job;
+        document.getElementById('again-name').textContent = job.name;
+        showMsg('');
+        form.closest('.card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    document.getElementById('again-x').addEventListener('click', function () { use(null); });
     syncSource();
 
     // Every visible setting; empty boxes and "From file" are left out so the .blend's value is kept.
@@ -173,7 +217,6 @@
         });
         o.compositing = { mode: o.comp_mode };
         delete o.comp_mode;
-        delete o.src;
         delete o.drive_file;
         return o;
     }
@@ -219,14 +262,15 @@
     form.addEventListener('submit', function (e) {
         e.preventDefault();
         if (uploading) return;
-        if (source() !== 'upload') {  // the server fetches the file itself
-            var body = source() === 'drive' ? { drive_path: drivePick } : { drive_url: driveUrl.value.trim() };
+        if (!src) return;
+        if (src !== 'upload') {  // the server gets the file itself
+            var body = src === 'drive' ? { drive_path: drivePick } : src === 'link' ? { url: linkInput.value.trim() } : { again: again.id };
             body.options = options();
             uploading = true;
             syncSource();
             showMsg('');
             api('POST', '/api/jobs', body).then(function () {
-                if (source() === 'link') driveUrl.value = '';
+                use(null);
                 poll(true);
             }).catch(function (err) {
                 showMsg(err.message, true);
@@ -236,7 +280,6 @@
             });
             return;
         }
-        if (!chosen) return;
         uploading = true;
         goBtn.disabled = true;
         upBox.hidden = false;
@@ -253,11 +296,7 @@
             return api('POST', '/api/jobs', { upload_id: uploadId, filename: file.name, options: options() });
         }).then(function () {
             upText.textContent = 'Queued';
-            fileInput.value = '';
-            chosen = null;
-            drop.classList.remove('has');
-            dropMain.innerHTML = 'Drop a <b>.blend</b> file here, or click to choose';
-            dropSub.textContent = 'Using textures that aren’t packed? Zip the .blend together with its texture folders and upload the .zip.';
+            use(null);
             poll(true);
         }).catch(function (err) {
             showMsg(err.message, true);
@@ -299,6 +338,7 @@
                 if (!log.hidden) loadLog(job.id, el);
             }
             if (act === 'all') { el._showAll = true; renderGallery(el, el._job); }
+            if (act === 'again') startAgain(el._job);
         });
         return el;
     }
@@ -405,7 +445,9 @@
         }
         el.querySelector('[data-act="cancel"]').hidden = !busy;
         var compLink = el.querySelector('[data-act="comp"]');
-        compLink.hidden = !job.raw_frames;
+        // With Custom nodes it's there from the start: the editor opens once the first frame is done.
+        compLink.hidden = !job.raw_frames && !(comp.mode === 'custom' && busy);
+        el.querySelector('[data-act="again"]').hidden = !job.has_file || job.status === 'preparing';
         compLink.href = '/compositor/' + job.id;
 
         if (el._outputs !== job.outputs.length || el._version !== job.version) {

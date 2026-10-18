@@ -995,7 +995,7 @@
         if (job.raw_frames) { box.hidden = true; return; }
         box.hidden = false;
         var custom = job.opts.compositing && job.opts.compositing.mode === 'custom';
-        if (!custom) text.textContent = 'This render was made without Custom nodes compositing, so there are no raw frames to work on. Render the file again with Compositing → Custom nodes.';
+        if (!custom) text.textContent = 'This render was made without Custom nodes compositing, so there are no raw frames to work on. Go back to Renders, press Render again on it and pick Compositing → Custom nodes.';
         else if (job.status === 'failed' || job.status === 'cancelled') text.textContent = 'This render ' + job.status + ' before any frame was done.';
         else text.textContent = 'Rendering… the compositor opens as soon as the first frame is done.';
         pmsg.textContent = '';

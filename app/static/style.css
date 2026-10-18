@@ -71,11 +71,25 @@ h1 { font-size: 18px; margin: 0 0 14px; }
 .drop-main { font-size: 15px; word-break: break-all; }
 .drop-sub { color: var(--muted); font-size: 13px; max-width: 520px; }
 
-/* Where the file comes from */
-.seg.src { margin-bottom: 14px; }
-.drive, .link { display: flex; flex-direction: column; gap: 10px; }
-.drive-head { display: flex; align-items: flex-start; gap: 12px; }
-.drive-head .hint { flex: 1; margin: 0; }
+/* Where the file comes from: upload, a link, or the Google Drive folder. Using one clears the others. */
+.sources { display: flex; flex-direction: column; gap: 18px; }
+.drive, .link { display: flex; flex-direction: column; gap: 8px; }
+.drive-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 30px; }
+.drive .hint { margin: 0; }
+.link.has input { border-color: var(--accent); }
+.again {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 16px;
+    padding: 14px 16px;
+    border: 1.5px solid var(--accent);
+    border-radius: 10px;
+    background: rgba(208, 138, 74, .06);
+}
+.again p { margin: 0; overflow-wrap: anywhere; }
+.card:has(#form) { scroll-margin-top: 76px; }  /* clear of the sticky top bar */
 .drive-list {
     display: flex;
     flex-direction: column;

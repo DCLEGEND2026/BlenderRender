@@ -226,21 +226,27 @@ def drive_path(rel):
     return path if path.lower().endswith((".blend", ".zip")) else None
 
 
-def drive_link(url):
-    """(gdown URL, is a folder) for a Google Drive share link, or None if it isn't one."""
+def file_link(url):
+    """(URL to download, is a Drive folder, from Google Drive) for a link from the page, or None.
+    Google Drive share links (files and folders) and direct download links both work."""
     try:
         u = urlparse(str(url).strip())
     except ValueError:
         return None
-    if u.scheme not in ("http", "https") or u.hostname not in DRIVE_HOSTS:
+    if u.scheme not in ("http", "https") or not u.hostname:
         return None
-    parts = [p for p in u.path.split("/") if p]
-    if "folders" in parts and parts.index("folders") + 1 < len(parts):
-        fid = parts[parts.index("folders") + 1]
-        return ("https://drive.google.com/drive/folders/" + fid, True) if RE_DRIVE_ID.match(fid) else None
-    fid = parts[parts.index("d") + 1] if "d" in parts and parts.index("d") + 1 < len(parts) else \
-        (parse_qs(u.query).get("id") or [""])[0]
-    return ("https://drive.google.com/uc?id=" + fid, False) if RE_DRIVE_ID.match(fid) else None
+    if u.hostname in DRIVE_HOSTS:
+        parts = [p for p in u.path.split("/") if p]
+        if "folders" in parts and parts.index("folders") + 1 < len(parts):
+            fid = parts[parts.index("folders") + 1]
+            return ("https://drive.google.com/drive/folders/" + fid, True, True) if RE_DRIVE_ID.match(fid) else None
+        fid = parts[parts.index("d") + 1] if "d" in parts and parts.index("d") + 1 < len(parts) else \
+            (parse_qs(u.query).get("id") or [""])[0]
+        return ("https://drive.google.com/uc?id=" + fid, False, True) if RE_DRIVE_ID.match(fid) else None
+    if u.hostname.endswith("dropbox.com"):  # a share link opens a web page unless dl=1
+        query = [q for q in u.query.split("&") if q and not q.startswith("dl=")] + ["dl=1"]
+        return (u._replace(query="&".join(query)).geturl(), False, False)
+    return (u.geturl(), False, False)
 
 
 # ---- Jobs ------------------------------------------------------------------------
@@ -268,11 +274,22 @@ def create_job():
             return jsonify(job=jobs.create_from_drive(path, opts).to_dict())
         except ValueError as e:
             return jsonify(error=str(e)), 400
-    if "drive_url" in body:
-        link = drive_link(body["drive_url"])
+    if "url" in body:
+        link = file_link(body["url"])
         if not link:
-            return jsonify(error="Paste a Google Drive link to a file or folder (drive.google.com/...)"), 400
-        return jsonify(job=jobs.create_from_link(link[0], link[1], opts).to_dict())
+            if any(h in str(body["url"]) for h in DRIVE_HOSTS):
+                return jsonify(error="That Google Drive link isn't to a file or folder. Use Share → Copy link "
+                                     "on the file (or the folder) itself."), 400
+            return jsonify(error="That doesn't look like a link. Paste the whole thing, starting with https://"), 400
+        return jsonify(job=jobs.create_from_link(*link, opts=opts).to_dict())
+    if "again" in body:  # the same file as an earlier render, with new settings
+        old = get_job(str(body["again"]))
+        if opts["compositing"]["mode"] == "custom" and old.custom_compositing():
+            opts["compositing"] = old.opts["compositing"]  # keep the nodes built for it
+        try:
+            return jsonify(job=jobs.create_again(old, opts).to_dict())
+        except ValueError as e:
+            return jsonify(error=str(e)), 400
     upload_id = str(body.get("upload_id", ""))
     filename = os.path.basename(str(body.get("filename", "")))
     path = os.path.join(UPLOAD_DIR, upload_id + ".part")
