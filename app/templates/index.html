@@ -183,7 +183,10 @@
   </section>
 
   <section>
-    <h2 class="sec-h">Renders</h2>
+    <div class="sec-row">
+      <h2 class="sec-h">Renders</h2>
+      <a class="btn sm ghost" href="/compare" id="compare-all" hidden>Compare renders</a>
+    </div>
     <div id="jobs"><p class="empty">Nothing rendered yet. Upload a file above.</p></div>
   </section>
 </main>
@@ -205,6 +208,7 @@
       <a class="btn sm" data-act="video" hidden>Download MP4</a>
       <a class="btn sm" data-act="comp" hidden>Open compositor</a>
       <button type="button" class="btn sm" data-act="again" hidden>Render again</button>
+      <a class="btn sm" data-act="compare" hidden>Compare</a>
       <button type="button" class="btn sm" data-act="cancel" hidden>Cancel</button>
       <button type="button" class="btn sm ghost" data-act="log">Show log</button>
       <button type="button" class="btn sm ghost" data-act="delete">Delete</button>

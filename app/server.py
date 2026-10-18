@@ -78,6 +78,11 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/compare")
+def compare():
+    return render_template("compare.html")
+
+
 @app.route("/compositor/<job_id>")
 def compositor(job_id):
     job = get_job(job_id)
@@ -194,10 +199,24 @@ def drive_label():
     return "My Drive/" + DRIVE_DIR[len(mine):] if DRIVE_DIR.startswith(mine) else DRIVE_DIR
 
 
+def drive_ready():
+    """Whether the Drive folder is there, making it if it was deleted while Drive is connected.
+    Only when its grandparent (My Drive) exists: otherwise Drive isn't mounted, and folders made
+    on the local disk would block mounting it later."""
+    if not DRIVE_DIR:
+        return False
+    if not os.path.isdir(DRIVE_DIR) and os.path.isdir(os.path.dirname(os.path.dirname(DRIVE_DIR))):
+        try:
+            os.makedirs(DRIVE_DIR, exist_ok=True)
+        except OSError:
+            pass
+    return os.path.isdir(DRIVE_DIR)
+
+
 @app.route("/api/drive")
 def drive_files():
     """.blend and .zip files in the mounted Drive folder (and its subfolders), newest first."""
-    if not DRIVE_DIR or not os.path.isdir(DRIVE_DIR):
+    if not drive_ready():
         return jsonify(enabled=False, folder="", files=[])
     files = []
     for base, dirs, names in os.walk(DRIVE_DIR):

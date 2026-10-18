@@ -311,6 +311,7 @@
     var cards = {};
     var STATUS = { preparing: 'Getting file', queued: 'Queued', running: 'Rendering', compositing: 'Compositing', encoding: 'Making MP4', done: 'Done', failed: 'Failed', cancelled: 'Cancelled' };
     var BUSY = ['preparing', 'queued', 'running', 'compositing', 'encoding'];
+    var IMAGE = /\.(png|jpe?g|webp)$/i;  // what a browser can show (not EXR)
 
     // v changes each time the frames are composited again, so the browser doesn't show old copies.
     function fileUrl(job, name, dl) {
@@ -448,6 +449,9 @@
         // With Custom nodes it's there from the start: the editor opens once the first frame is done.
         compLink.hidden = !job.raw_frames && !(comp.mode === 'custom' && busy);
         el.querySelector('[data-act="again"]').hidden = !job.has_file || job.status === 'preparing';
+        var cmp = el.querySelector('[data-act="compare"]');
+        cmp.hidden = busy || !job.outputs.some(function (n) { return IMAGE.test(n); });
+        cmp.href = '/compare?a=' + job.id;
         compLink.href = '/compositor/' + job.id;
 
         if (el._outputs !== job.outputs.length || el._version !== job.version) {
@@ -480,6 +484,8 @@
             Object.keys(cards).forEach(function (id) {
                 if (!seen[id]) { cards[id].remove(); delete cards[id]; }
             });
+            var pictures = d.jobs.reduce(function (n, j) { return n + j.outputs.filter(function (o) { return IMAGE.test(o); }).length; }, 0);
+            document.getElementById('compare-all').hidden = pictures < 2;
             var active = d.jobs.some(function (j) { return BUSY.indexOf(j.status) !== -1; });
             pollTimer = setTimeout(poll, active ? 2000 : 8000);
             if (active) loadSystem();

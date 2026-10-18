@@ -28,6 +28,23 @@ Open the notebook, run it, and you get a link to a website where you upload a
 Big files are fine: the page uploads in 32 MB pieces, so the tunnel's 100 MB
 request limit doesn't apply. For really big projects, use Google Drive instead (below).
 
+## Compare renders
+
+Press **Compare** on a render (or **Compare renders** above the list) to put two renders
+on top of each other with a divider you drag, like a before/after slider. It's made for
+**Render again**: by default the render is compared with the latest other render of
+the same file.
+
+- Pick any render and frame for each side (A and B); **⇄** swaps them. Two frames of
+  one animation work too. With *Same frame on both*, B follows A's frame.
+- Under the picture it lists what differs between A and B (samples, size, denoise,
+  compositing…).
+- **Side by side** shows them next to each other instead. **100%** and **200%** zoom in
+  to look at noise; drag to move around, and drag the divider itself to move it.
+- Arrow keys move the divider (Shift for big steps). The address keeps your choice, so
+  a reload or a bookmark opens the same comparison.
+- EXR renders can't be shown in a browser, so they aren't listed.
+
 ## Google Drive and links (faster for big files)
 
 Uploading through the page sends the file over your internet connection and then
@@ -43,6 +60,9 @@ asks you to connect your Google Drive and makes two folders in `My Drive/Blender
   one and press **Render**. The list updates when you come back to the tab, or press
   **Refresh**. A file you just added can take a minute to show up.
 - `Renders`: step 5 copies your renders here.
+
+Both are made if they don't exist yet, and the website makes `Blend files` again if
+you delete it while it's running.
 
 A `.blend` renders straight from Drive, so textures next to it (relative paths) work
 without zipping anything. A `.zip` is unpacked on the Colab machine, and the zip in
@@ -138,8 +158,8 @@ app/preview.py         Keeps one Blender running for the compositor's live previ
 app/blender_nodes.py   Runs inside Blender: builds a compositing graph as real nodes
 app/blender_composite.py  Runs inside Blender: composites every rendered frame at full size
 app/blender_preview.py    Runs inside Blender: answers preview requests from preview.py
-app/templates/         index.html (upload + renders), compositor.html and login.html
-app/static/            app.js, compositor.js and their CSS
+app/templates/         index.html (upload + renders), compositor.html, compare.html and login.html
+app/static/            app.js, compositor.js, compare.js and their CSS
 ```
 
 ### Run it on your own machine

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Compare renders</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='compare.css') }}">
+</head>
+<body class="cmp-page">
+<header class="bar cmp-bar">
+  <a class="btn sm ghost" href="/">← Renders</a>
+  <b>Compare renders</b>
+  <div class="cmp-tools">
+    <div class="seg" role="radiogroup" aria-label="View">
+      <label><input type="radio" name="view" value="slider" checked><span>Slider</span></label>
+      <label><input type="radio" name="view" value="side"><span>Side by side</span></label>
+    </div>
+    <div class="seg" role="radiogroup" aria-label="Zoom">
+      <label><input type="radio" name="zoom" value="0" checked><span>Fit</span></label>
+      <label><input type="radio" name="zoom" value="1"><span>100%</span></label>
+      <label><input type="radio" name="zoom" value="2"><span>200%</span></label>
+    </div>
+  </div>
+</header>
+
+<main class="cmp">
+  <div class="cmp-pick">
+    <div class="cmp-side" data-side="a">
+      <span class="cmp-tag">A</span>
+      <select class="cmp-job" aria-label="Render on the left"></select>
+      <select class="cmp-frame" aria-label="Frame on the left"></select>
+      <span class="cmp-meta"></span>
+    </div>
+    <button type="button" class="btn sm ghost cmp-swap" id="swap" title="Swap A and B">⇄</button>
+    <div class="cmp-side" data-side="b">
+      <span class="cmp-tag">B</span>
+      <select class="cmp-job" aria-label="Render on the right"></select>
+      <select class="cmp-frame" aria-label="Frame on the right"></select>
+      <span class="cmp-meta"></span>
+    </div>
+  </div>
+  <label class="check cmp-same" id="same-box" hidden><input type="checkbox" id="same" checked> Same frame on both</label>
+
+  <div class="cmp-stage" id="stage" tabindex="0" aria-label="Comparison. Drag, or use the arrow keys, to move the divider.">
+    <div class="cmp-canvas" id="canvas">
+      <img class="cmp-img" id="img-b" alt="Render B">
+      <img class="cmp-img cmp-top" id="img-a" alt="Render A">
+      <div class="cmp-line" id="line"><span class="cmp-handle" id="handle" aria-hidden="true">⟷</span></div>
+      <span class="cmp-label l">A</span>
+      <span class="cmp-label r">B</span>
+    </div>
+    <p class="cmp-empty" id="empty" hidden></p>
+  </div>
+  <p class="cmp-note" id="note"></p>
+</main>
+
+<script src="{{ url_for('static', filename='compare.js') }}"></script>
+</body>
+</html>
