@@ -130,7 +130,8 @@
     function updateApply() {
         var busy = job && ['preparing', 'queued', 'running', 'compositing', 'encoding'].indexOf(job.status) !== -1;
         applyBtn.disabled = !job || !job.raw_frames || busy;
-        applyBtn.textContent = busy && job.status !== 'running' ? 'Applying…' :
+        var live = job && (job.status === 'compositing' || job.status === 'encoding');
+        applyBtn.textContent = live ? 'Applying… ' + clockText(applyElapsed()) : busy && job.status !== 'running' ? 'Applying…' :
             (canon(graph) !== applied ? 'Apply to render •' : 'Apply to render');
     }
 
@@ -419,6 +420,7 @@
             drag = { type: 'move', ids: [n.id], start: { x: at.x + NODE_W / 2, y: at.y + 14 }, orig: {}, grab: true, moved: true };
             drag.orig[n.id] = { x: n.x, y: n.y };
             canvas.classList.add('grabbing');
+            markWire(wireUnder(n));  // added right on a wire: one click puts it in
         }
         return n;
     }
@@ -488,16 +490,40 @@
         drawWires();
         changed(true);
     }
-    // Dropping a node on a wire puts it in between, like in Blender.
-    function wireUnder(e) {
-        var hits = document.elementsFromPoint(e.clientX, e.clientY);
-        for (var i = 0; i < hits.length; i++) if (hits[i].classList && hits[i].classList.contains('wire-hit')) return Number(hits[i].dataset.link);
-        return -1;
+    // Dropping a node on a wire puts it in between, like in Blender: the wire has to pass
+    // under the node (the one closest to its middle wins). Only for a node with no wires yet.
+    function canInsert(n) {
+        var spec = SPEC[n.type];
+        return spec.inputs.length && spec.outputs.length &&
+            !graph.links.some(function (x) { return x.from[0] === n.id || x.to[0] === n.id; });
+    }
+    function wireUnder(n) {
+        if (!n || !canInsert(n)) return -1;
+        var h = els[n.id] ? els[n.id].offsetHeight : 100;
+        var cx = n.x + NODE_W / 2, cy = n.y + h / 2, best = -1, bestD = Infinity;
+        graph.links.forEach(function (l, i) {
+            var a = sockPos(l.from[0], 'out', l.from[1]), b = sockPos(l.to[0], 'in', l.to[1]);
+            if (!a || !b) return;
+            var dx = Math.max(40, Math.abs(b.x - a.x) / 2);
+            for (var k = 0; k <= 40; k++) {  // points along the wire's curve (see curve())
+                var t = k / 40, u = 1 - t;
+                var x = u * u * u * a.x + 3 * u * u * t * (a.x + dx) + 3 * u * t * t * (b.x - dx) + t * t * t * b.x;
+                var y = u * u * u * a.y + 3 * u * u * t * a.y + 3 * u * t * t * b.y + t * t * t * b.y;
+                if (x < n.x || x > n.x + NODE_W || y < n.y || y > n.y + h) continue;
+                var d = Math.abs(x - cx) + Math.abs(y - cy);
+                if (d < bestD) { bestD = d; best = i; }
+            }
+        });
+        return best;
+    }
+    function markWire(index) {
+        Array.prototype.forEach.call(wires.querySelectorAll('.wire'), function (w) {
+            w.classList.toggle('hot', Number(w.dataset.link) === index);
+        });
     }
     function insertOnWire(n, linkIndex) {
         var spec = SPEC[n.type], l = graph.links[linkIndex];
-        if (!l || !spec.inputs.length || !spec.outputs.length || l.from[0] === n.id || l.to[0] === n.id) return;
-        if (graph.links.some(function (x) { return x.from[0] === n.id || x.to[0] === n.id; })) return;
+        if (!l || !canInsert(n) || l.from[0] === n.id || l.to[0] === n.id) return;
         var type = outType(l.from[0], l.from[1]);
         var input = spec.inputs.filter(function (i) { return i.type === type; })[0] || spec.inputs[0];
         var output = spec.outputs.filter(function (o) { return o.type === type; })[0] || spec.outputs[0];
@@ -506,57 +532,131 @@
         connect([n.id, output.id], l.to);
     }
 
-    // ---- Add menu (Shift+A) ------------------------------------------------------------
-    var menuAt = null, menuGrab = false;
+    // ---- Add menu (Shift+A): categories that open their nodes, like Blender's -----------
+    // Typing searches every node instead. Arrow keys move, Enter picks, Esc closes.
+    var menuSub = document.getElementById('menu-sub');
+    var menuAt = null, menuGrab = false, menuHi = null;
     function openMenu(at, screen, grab) {
         menuAt = at;
         menuGrab = grab;
+        menuSearch.value = '';
+        fillMenu();
         menu.hidden = false;
         var c = canvas.getBoundingClientRect();
         menu.style.left = Math.max(8, Math.min(screen.x, c.width - menu.offsetWidth - 8)) + 'px';
         menu.style.top = Math.max(8, Math.min(screen.y, c.height - menu.offsetHeight - 8)) + 'px';
-        menuSearch.value = '';
-        fillMenu();
         menuSearch.focus();
     }
     function closeMenu() {
         menu.hidden = true;
+        menuSub.hidden = true;
         canvas.focus();
     }
-    function fillMenu() {
-        var q = menuSearch.value.trim().toLowerCase(), group = null, first = null;
+    function addable() {
         var hasViewer = graph.nodes.some(function (n) { return n.type === 'viewer'; });
+        return NODES.filter(function (n) { return !n.fixed && !(n.single && hasViewer); });
+    }
+    function menuItem(n, showGroup) {
+        var b = make('button', 'ce-menu-item g-' + n.group.toLowerCase());
+        b.type = 'button';
+        b.dataset.type = n.id;
+        b.title = n.hint || '';
+        b.appendChild(make('span', '', n.label));
+        if (showGroup) b.appendChild(make('small', '', n.group));
+        return b;
+    }
+    function highlight(b) {
+        if (menuHi) menuHi.classList.remove('hi');
+        menuHi = b;
+        if (b) { b.classList.add('hi'); b.scrollIntoView({ block: 'nearest' }); }
+    }
+    function fillMenu() {
+        var q = menuSearch.value.trim().toLowerCase(), nodes = addable(), groups = [];
         menuList.innerHTML = '';
-        NODES.forEach(function (n) {
-            if (n.fixed || (n.single && hasViewer)) return;
-            if (q && (n.label + ' ' + n.group).toLowerCase().indexOf(q) === -1) return;
-            if (n.group !== group) {
-                group = n.group;
-                menuList.appendChild(make('div', 'ce-menu-group', group));
-            }
-            var b = menuList.appendChild(make('button', 'ce-menu-item g-' + n.group.toLowerCase(), n.label));
-            b.type = 'button';
-            b.dataset.type = n.id;
-            b.title = n.hint || '';
-            first = first || b;
-        });
-        if (!first) menuList.appendChild(make('p', 'ce-menu-none', 'No node matches'));
-        if (first) first.classList.add('first');
+        menuSub.hidden = true;
+        if (q) {
+            nodes.forEach(function (n) {
+                if ((n.label + ' ' + n.group).toLowerCase().indexOf(q) !== -1) menuList.appendChild(menuItem(n, true));
+            });
+            if (!menuList.firstChild) menuList.appendChild(make('p', 'ce-menu-none', 'No node matches'));
+        } else {
+            nodes.forEach(function (n) { if (groups.indexOf(n.group) === -1) groups.push(n.group); });
+            groups.forEach(function (g) {
+                var b = make('button', 'ce-menu-item ce-menu-cat g-' + g.toLowerCase());
+                b.type = 'button';
+                b.dataset.group = g;
+                b.appendChild(make('span', '', g));
+                b.appendChild(make('i', '', '›'));
+                menuList.appendChild(b);
+            });
+        }
+        highlight(menuList.querySelector('button'));
+    }
+    // The category's nodes, in a list next to the menu (left of it if there's no room).
+    // On a narrow screen the list covers the menu instead, with a row to go back.
+    function roomBeside() {
+        var c = canvas.getBoundingClientRect(), m = menu.getBoundingClientRect(), w = 210;  // .ce-sub width
+        return m.right + w < c.right - 8 || m.left - w > c.left + 8;
+    }
+    function openGroup(cat) {
+        Array.prototype.forEach.call(menuList.querySelectorAll('.ce-menu-cat'), function (b) { b.classList.toggle('open', b === cat); });
+        if (!menuSub.hidden && menuSub.dataset.group === cat.dataset.group) return;
+        menuSub.dataset.group = cat.dataset.group;
+        menuSub.innerHTML = '';
+        addable().forEach(function (n) { if (n.group === cat.dataset.group) menuSub.appendChild(menuItem(n, false)); });
+        menuSub.hidden = false;
+        var c = canvas.getBoundingClientRect(), m = menu.getBoundingClientRect(), r = cat.getBoundingClientRect();
+        var w = menuSub.offsetWidth, left = m.right - c.left - 2, top = r.top - c.top - 5;
+        if (left + w > c.width - 8) left = m.left - c.left - w + 2;
+        if (left < 8) {
+            var back = make('button', 'ce-menu-item ce-menu-back', '‹ ' + cat.dataset.group);
+            back.type = 'button';
+            back.dataset.back = '1';
+            menuSub.insertBefore(back, menuSub.firstChild);
+            left = m.left - c.left;
+            top = m.top - c.top;
+        }
+        menuSub.style.left = left + 'px';
+        menuSub.style.top = Math.max(8, Math.min(top, c.height - menuSub.offsetHeight - 8)) + 'px';
+    }
+    function pick(b) {
+        if (b.dataset.back) { menuSub.hidden = true; highlight(menuList.querySelector('.ce-menu-cat.open')); return; }
+        if (b.dataset.group) { openGroup(b); highlight(menuSub.querySelector('[data-type]')); return; }
+        closeMenu();
+        addNode(b.dataset.type, menuAt, menuGrab);
     }
     menuSearch.addEventListener('input', fillMenu);
     menuSearch.addEventListener('keydown', function (e) {
         e.stopPropagation();
+        var inSub = menuHi && menuSub.contains(menuHi);
+        var list = Array.prototype.slice.call((inSub ? menuSub : menuList).querySelectorAll('button'));
+        var i = list.indexOf(menuHi);
         if (e.key === 'Escape') closeMenu();
-        if (e.key === 'Enter') {
-            var first = menuList.querySelector('.first');
-            if (first) first.click();
+        else if (e.key === 'Enter') { e.preventDefault(); if (menuHi) pick(menuHi); }
+        else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            highlight(list[(i + (e.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length]);
+            if (!inSub) menuSub.hidden = true;
+        }
+        else if (e.key === 'ArrowRight' && menuHi && menuHi.dataset.group) { e.preventDefault(); pick(menuHi); }
+        else if (e.key === 'ArrowLeft' && inSub) {
+            e.preventDefault();
+            menuSub.hidden = true;
+            highlight(menuList.querySelector('.ce-menu-cat.open'));
         }
     });
-    menuList.addEventListener('click', function (e) {
-        var b = e.target.closest('[data-type]');
-        if (!b) return;
-        closeMenu();
-        addNode(b.dataset.type, menuAt, menuGrab);
+    [menuList, menuSub].forEach(function (box) {
+        box.addEventListener('pointerover', function (e) {
+            var b = e.target.closest('button');
+            if (!b) return;
+            highlight(b);
+            if (b.dataset.group && roomBeside()) openGroup(b);  // otherwise it opens on a tap
+        });
+        box.addEventListener('click', function (e) {
+            var b = e.target.closest('button');
+            if (b) pick(b);
+            if (!menu.hidden) menuSearch.focus();
+        });
     });
     document.getElementById('add-btn').addEventListener('click', function (e) {
         var c = canvas.getBoundingClientRect(), at = viewCenter();
@@ -566,8 +666,8 @@
 
     // ---- Pointer: select, move, connect, pan -------------------------------------------
     canvas.addEventListener('pointerdown', function (e) {
-        if (!menu.hidden && !menu.contains(e.target)) closeMenu();
-        if (drag && drag.grab) { finishMove(e); e.preventDefault(); return; }
+        if (!menu.hidden && !menu.contains(e.target) && !menuSub.contains(e.target)) closeMenu();
+        if (drag && drag.grab) { finishMove(); e.preventDefault(); return; }
         if (e.target.closest('.ce-menu, .ce-zoom, .ce-cover, select, input, label, .nf')) return;
         if (e.button !== 0 && e.button !== 1) return;
         var at = toWorld(e), sock = e.target.closest('.sock'), nodeEl = e.target.closest('.cn');
@@ -624,24 +724,19 @@
                 refreshNode(n);
             });
             drawWires();
-            if (drag.ids.length === 1) {
-                var hot = wireUnder(e);
-                Array.prototype.forEach.call(wires.querySelectorAll('.wire'), function (w) {
-                    w.classList.toggle('hot', Number(w.dataset.link) === hot);
-                });
-            }
+            if (drag.ids.length === 1) markWire(wireUnder(nodeById(drag.ids[0])));
         } else if (drag.type === 'link') {
             drag.end = pointer;
             drawWires();
         }
     });
 
-    function finishMove(e) {
+    function finishMove() {
         var d = drag;
         drag = null;
         canvas.classList.remove('grabbing');
         if (d.moved && d.ids.length === 1) {
-            var hot = wireUnder(e);
+            var hot = wireUnder(nodeById(d.ids[0]));
             if (hot !== -1) insertOnWire(nodeById(d.ids[0]), hot);
         }
         graph.nodes.forEach(refreshNode);
@@ -652,7 +747,7 @@
     canvas.addEventListener('pointerup', function (e) {
         if (!drag || drag.grab) return;
         var d = drag;
-        if (d.type === 'move') { finishMove(e); return; }
+        if (d.type === 'move') { finishMove(); return; }
         drag = null;
         if (d.type === 'pan') {
             if (!d.moved && Object.keys(selected).length) { selected = {}; graph.nodes.forEach(refreshNode); }
@@ -731,52 +826,109 @@
     });
 
     // ---- Live preview ------------------------------------------------------------------
-    var previewTimer = null, previewBusy = false, previewAgain = false, previewUrl = null;
+    // Previews already made (same nodes, settings, frame and size) are kept, so going back
+    // to one (undo, another frame, another size) shows it at once without asking Blender.
+    var previewTimer = null, previewBusy = false, wanted = '', clock = null;
+    var made = new Map(), madeBytes = 0;
+    var SCALE_KEY = 'comp-preview-scale';
+    try {
+        var savedScale = localStorage.getItem(SCALE_KEY);
+        if (savedScale && sizeSelect.querySelector('option[value="' + savedScale + '"]')) sizeSelect.value = savedScale;
+    } catch (e) { /* private mode */ }
+
+    function secs(s) { return s < 60 ? s.toFixed(s < 10 ? 2 : 1) + ' s' : clockText(s); }
+    function clockText(s) {
+        s = Math.max(0, Math.round(s));
+        var m = Math.floor(s / 60), h = Math.floor(m / 60);
+        return (h ? h + ':' + ('0' + m % 60).slice(-2) : m) + ':' + ('0' + s % 60).slice(-2);
+    }
     function schedulePreview() {
         clearTimeout(previewTimer);
         previewTimer = setTimeout(runPreview, 40);
     }
+    function previewKey() {  // node positions don't change the picture
+        return canon({
+            nodes: graph.nodes.map(function (n) { return [n.id, n.type, !!n.mute, n.values]; }),
+            links: graph.links, frame: Number(frameInput.value), scale: sizeSelect.value
+        });
+    }
+    function remember(key, entry) {
+        made.set(key, entry);
+        madeBytes += entry.bytes;
+        while (made.size > 1 && (made.size > 60 || madeBytes > 300e6)) {  // full-size previews of big renders are large
+            var oldKey = made.keys().next().value, old = made.get(oldKey);
+            made.delete(oldKey);
+            madeBytes -= old.bytes;
+            if (old.url) URL.revokeObjectURL(old.url);
+        }
+    }
+    function showPreview(entry, note) {
+        pimg.hidden = !entry.url;
+        pmsg.hidden = !!entry.url;
+        if (!entry.url) {
+            pmsg.textContent = 'Nothing is plugged into the ' + (entry.viewer ? 'Viewer' : 'Composite') + ' node.';
+            pstat.textContent = note;
+            return;
+        }
+        pimg.onload = function () { pstat.textContent = note + ' · ' + pimg.naturalWidth + ' × ' + pimg.naturalHeight + ' px'; };
+        if (pimg.src === entry.url) pimg.onload();
+        else pimg.src = entry.url;
+    }
     function runPreview() {
         if (!job || !job.raw_frames) return;
-        if (previewBusy) { previewAgain = true; return; }
-        previewBusy = true;
-        previewAgain = false;
-        pstat.textContent = 'Updating…';
-        var started = Date.now();
+        var key = previewKey();
         var hasViewer = graph.links.some(function (l) { var n = nodeById(l.to[0]); return n && n.type === 'viewer'; });
         document.getElementById('viewer-badge').hidden = !hasViewer;
+        wanted = key;
+        var known = made.get(key);
+        if (known) {
+            made.delete(key);  // now the most recently used
+            made.set(key, known);
+            showPreview(known, 'Shown again without redoing it (it took ' + secs(known.secs) + ')');
+            return;
+        }
+        if (previewBusy) return;  // runs again for `wanted` when the current one is back
+        previewBusy = true;
+        var started = Date.now();
+        clearInterval(clock);
+        pstat.textContent = 'Updating… 0.00 s';
+        clock = setInterval(function () {
+            if (wanted === key) pstat.textContent = 'Updating… ' + secs((Date.now() - started) / 1000);
+        }, 100);
         fetch('/api/jobs/' + JOB_ID + '/preview', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'same-origin',
-            body: JSON.stringify({ graph: graph, frame: Number(frameInput.value), size: sizeSelect.value })
+            body: JSON.stringify({ graph: graph, frame: Number(frameInput.value), scale: Number(sizeSelect.value) })
         }).then(function (r) {
             if (r.status === 204) return null;
             if (!r.ok) return r.json().catch(function () { return {}; }).then(function (d) { throw new Error(d.error || ('HTTP ' + r.status)); });
             return r.blob();
         }).then(function (blob) {
-            if (previewUrl) URL.revokeObjectURL(previewUrl);
-            previewUrl = blob ? URL.createObjectURL(blob) : null;
-            pimg.hidden = !blob;
-            pmsg.hidden = !!blob;
-            if (blob) pimg.src = previewUrl;
-            else pmsg.textContent = 'Nothing is plugged into the ' + (hasViewer ? 'Viewer' : 'Composite') + ' node.';
-            pstat.textContent = 'Updated in ' + ((Date.now() - started) / 1000).toFixed(2) + ' s';
+            var entry = { url: blob ? URL.createObjectURL(blob) : null, bytes: blob ? blob.size : 0,
+                          viewer: hasViewer, secs: (Date.now() - started) / 1000 };
+            remember(key, entry);
+            if (wanted === key) showPreview(entry, 'Updated in ' + secs(entry.secs));
         }).catch(function (err) {
+            if (wanted !== key) return;
             pstat.textContent = '';
             pmsg.hidden = false;
             pimg.hidden = true;
             pmsg.textContent = 'Preview failed: ' + err.message;
         }).then(function () {
             previewBusy = false;
-            if (previewAgain) runPreview();
+            clearInterval(clock);
+            if (wanted !== key) runPreview();
         });
     }
     frameInput.addEventListener('input', function () {
         document.getElementById('frame-num').textContent = Number(frameInput.value) + 1 + ' / ' + job.raw_frames;
         schedulePreview();
     });
-    sizeSelect.addEventListener('change', schedulePreview);
+    sizeSelect.addEventListener('change', function () {
+        try { localStorage.setItem(SCALE_KEY, sizeSelect.value); } catch (e) { /* private mode */ }
+        schedulePreview();
+    });
 
     // ---- Apply to the render -------------------------------------------------------------
     applyBtn.addEventListener('click', function () {
@@ -792,20 +944,35 @@
         });
     });
 
-    var watchTimer = null;
+    // How long Apply has been running: the server's count, plus the time since we asked.
+    var watchTimer = null, applyClock = null, seenAt = 0;
+    function applyElapsed() {
+        var live = job.status === 'compositing' || job.status === 'encoding';
+        return (job.comp_elapsed || 0) + (live ? (Date.now() - seenAt) / 1000 : 0);
+    }
+    function applyProgress() {
+        var t = applyElapsed(), done = job.frames_done, total = job.frames_total;
+        if (job.status === 'encoding') return 'Making the MP4… ' + clockText(t);
+        var text = 'Applying: ' + (total > 1 ? done + ' of ' + total + ' frames · ' : '') + clockText(t);
+        if (done > 0 && done < total) text += ' · about ' + clockText(t / done * (total - done)) + ' left';
+        return text;
+    }
     function watchJob() {
         clearTimeout(watchTimer);
         api('GET', '/api/jobs/' + JOB_ID).then(function (d) {
             var first = !job || !job.raw_frames;
             var wasBusy = job && ['queued', 'compositing', 'encoding'].indexOf(job.status) !== -1;
             job = d.job;
+            seenAt = Date.now();
             setupFrames();
             var busy = ['preparing', 'queued', 'running', 'compositing', 'encoding'].indexOf(job.status) !== -1;
             if (job.opts.compositing && job.opts.compositing.graph) applied = canon(job.opts.compositing.graph);
+            clearInterval(applyClock);
             if (job.status === 'compositing' || job.status === 'encoding') {
-                showMsg(job.status === 'encoding' ? 'Making the MP4…' : 'Applying: frame ' + job.frames_done + ' of ' + job.frames_total);
+                showMsg(applyProgress());
+                applyClock = setInterval(function () { showMsg(applyProgress()); updateApply(); }, 250);
             } else if (wasBusy && job.status === 'done') {
-                showMsg('Applied. The render\'s images' + (job.video ? ' and MP4 are' : ' are') + ' updated.');
+                showMsg('Applied in ' + clockText(job.comp_elapsed) + '. The render\'s images' + (job.video ? ' and MP4 are' : ' are') + ' updated.');
             } else if (job.status === 'failed' && wasBusy) {
                 showMsg(job.error || 'Applying failed', true);
             }

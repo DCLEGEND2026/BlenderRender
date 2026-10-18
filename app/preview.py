@@ -60,7 +60,7 @@ class Previewer:
                 pass
             self.proc = None
 
-    def render(self, raw_path, info, graph, out_dir, max_size):
+    def render(self, raw_path, info, graph, out_dir, scale):
         """Composite raw_path with graph; returns the PNG's path, or None if nothing reaches the output."""
         req_id = uuid.uuid4().hex[:12]
         out = os.path.join(out_dir, "preview_" + req_id)
@@ -71,7 +71,7 @@ class Previewer:
                         self._start()
                     self.proc.stdin.write(json.dumps({
                         "id": req_id, "raw": raw_path, "info": info, "graph": graph,
-                        "max_size": max_size, "out": out}) + "\n")
+                        "scale": scale, "out": out}) + "\n")
                     self.proc.stdin.flush()
                     result = self._wait(req_id, 120)
                     break

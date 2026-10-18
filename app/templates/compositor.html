@@ -32,9 +32,10 @@
     </div>
     <p class="ce-help">Shift+A add · drag from a socket to connect · drop a node on a wire to insert it · X delete · M mute · Shift+D duplicate · Ctrl+Shift+click preview a node</p>
     <div class="ce-menu" id="menu" hidden>
-      <input type="search" id="menu-search" placeholder="Search nodes…" autocomplete="off">
+      <input type="search" id="menu-search" placeholder="Search…" autocomplete="off">
       <div class="ce-menu-list" id="menu-list"></div>
     </div>
+    <div class="ce-menu ce-sub" id="menu-sub" hidden></div>
     <div class="ce-cover" id="cover" hidden><p id="cover-text"></p></div>
   </section>
 
@@ -43,9 +44,11 @@
       <b>Preview</b>
       <span class="ce-badge" id="viewer-badge" hidden>Viewer</span>
       <label class="ce-frame" id="frame-box" hidden>Frame <input type="range" id="frame" min="0" value="0"> <span id="frame-num"></span></label>
-      <select id="size" title="Preview size">
-        <option value="fast">Fast (960 px)</option>
-        <option value="full">Full size</option>
+      <select id="size" title="Preview size, as a share of the render's resolution. Smaller is faster.">
+        <option value="0.25">25%</option>
+        <option value="0.5" selected>50%</option>
+        <option value="0.75">75%</option>
+        <option value="1">100% (full size)</option>
       </select>
     </div>
     <div class="ce-image">

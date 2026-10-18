@@ -308,7 +308,7 @@ def job_delete(job_id):
 
 @app.route("/api/jobs/<job_id>/preview", methods=["POST"])
 def job_preview(job_id):
-    """The graph applied to one raw frame, shrunk for speed unless size is "full"."""
+    """The graph applied to one raw frame, at scale (a share of the render's size) for speed."""
     job = get_job(job_id)
     raw = sorted(job.raw)
     if not raw:
@@ -319,7 +319,12 @@ def job_preview(job_id):
     out_dir = os.path.join(job.dir, "preview")
     os.makedirs(out_dir, exist_ok=True)
     try:
-        path = previewer.render(raw[frame], job.info, graph, out_dir, 0 if body.get("size") == "full" else 960)
+        scale = float(body.get("scale", 0.5))
+    except (TypeError, ValueError):
+        scale = 0.5
+    scale = min(1.0, max(0.1, scale))
+    try:
+        path = previewer.render(raw[frame], job.info, graph, out_dir, scale)
     except RuntimeError as e:
         return jsonify(error=str(e)), 500
     if path is None:

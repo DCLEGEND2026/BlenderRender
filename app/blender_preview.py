@@ -1,8 +1,9 @@
 # Runs inside Blender and stays running (see preview.py), so the Compositor page can
 # show the effect of every change within a moment:
 #   blender -b --factory-startup -P blender_preview.py
-# Reads one JSON request per line on stdin, composites a shrunk copy of the frame
+# Reads one JSON request per line on stdin, composites a (shrunk) copy of the frame
 # with the graph and saves a PNG, then answers with a line starting "@@preview".
+import array
 import json
 import os
 import sys
@@ -14,23 +15,34 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blender_nodes  # noqa: E402
 
 scene = bpy.context.scene
-cache = {}  # (path, max size) -> (image, scale)
+cache = {}  # (path, scale) -> image
 
 
-def source(path, max_size):
-    """The frame, shrunk to max_size on its long side; kept for the next requests."""
-    key = (path, max_size)
+def source(path, scale):
+    """The frame, shrunk to scale (1 = full size); kept for the next requests."""
+    key = (path, scale)
     if key not in cache:
         if len(cache) >= 6:
-            img, _ = cache.pop(next(iter(cache)))
-            bpy.data.images.remove(img)
+            bpy.data.images.remove(cache.pop(next(iter(cache))))
         img = bpy.data.images.load(path, check_existing=False)
-        w, h = img.size[0], img.size[1]
-        scale = min(1.0, max_size / max(w, h)) if max_size else 1.0
         if scale < 1.0:
-            img.scale(max(1, round(w * scale)), max(1, round(h * scale)))
-        cache[key] = (img, scale)
+            img = shrink(img, max(1, round(img.size[0] * scale)), max(1, round(img.size[1] * scale)))
+        cache[key] = img
     return cache[key]
+
+
+def shrink(src, w, h):
+    """A w x h copy of src. It has to be a new image: the compositor places a file image that
+    was only scaled in memory at its size on disk, so the picture comes out shifted."""
+    src.scale(w, h)
+    img = bpy.data.images.new("preview", w, h, alpha=True, float_buffer=True)
+    img.colorspace_settings.name = src.colorspace_settings.name
+    img.alpha_mode = src.alpha_mode
+    px = array.array("f", [0.0]) * (w * h * 4)
+    src.pixels.foreach_get(px)
+    img.pixels.foreach_set(px)
+    bpy.data.images.remove(src)
+    return img
 
 
 def answer(req_id, text):
@@ -47,7 +59,8 @@ while True:
         req = json.loads(line)
         req_id = req["id"]
         started = time.time()
-        img, scale = source(req["raw"], req.get("max_size", 0))
+        scale = min(1.0, max(0.05, float(req.get("scale", 1.0))))
+        img = source(req["raw"], scale)
         render = scene.render
         render.resolution_x, render.resolution_y, render.resolution_percentage = img.size[0], img.size[1], 100
         info = dict(req["info"], image={"color_mode": "RGBA", "color_depth": "8"})

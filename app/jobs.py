@@ -52,6 +52,8 @@ class Job:
         self.samples = (0, 0)
         self.remaining = ""
         self.fetch = ""  # while preparing: what is happening to the file (download progress)
+        self.comp_started = None  # the last time compositing ran (Apply on the Compositor page)
+        self.comp_finished = None
         self.saved = []
         self.raw = []
         self.version = 0  # bumped each time the frames are composited, so the page reloads them
@@ -116,6 +118,7 @@ class Job:
             "samples": list(self.samples),
             "remaining": self.remaining,
             "fetch": self.fetch,
+            "comp_elapsed": ((self.comp_finished or time.time()) - self.comp_started) if self.comp_started else 0,
             "progress": round(self.progress(), 4),
             "outputs": [os.path.basename(p) for p in self.saved],
             "video": self.video,
@@ -457,12 +460,16 @@ class JobManager:
         self._finish(job)
 
     def _recomposite(self, job):
-        self._composite(job)
-        self._finish(job)
+        try:
+            self._composite(job)
+            self._finish(job)
+        finally:
+            job.comp_finished = time.time()  # MP4 included
 
     def _composite(self, job):
         """Add the website's compositing nodes to the raw frames. Nothing is rendered, so it is quick."""
         job.status = "compositing"
+        job.comp_started, job.comp_finished = time.time(), None
         job.version += 1
         job.saved = []
         if job.video:
@@ -478,6 +485,7 @@ class JobManager:
             "--", opts_path, info_path, job.raw_dir, job.output_dir,
         ]
         code = self._blender(job, cmd, info_path)
+        job.comp_finished = time.time()
         if job.status == "compositing" and (code != 0 or len(job.saved) < len(job.raw)):
             job.status = "failed"
             job.error = self._last_error(job) or "Compositing stopped with code %d" % code

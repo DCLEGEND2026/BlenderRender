@@ -73,8 +73,9 @@ Pick **Custom nodes** under *Compositing* before you render. When frames are don
 press **Open compositor** on the render: it opens a node editor like Blender's, with
 a live preview next to it that updates as you change anything.
 
-- **Shift+A** (or *Add node*) adds a node; type to search. After Shift+A the node
-  follows the mouse until you click, and dropping it on a wire puts it in between.
+- **Shift+A** (or *Add node*) opens the Add menu: point at a category (Color, Filter…)
+  to see its nodes, or type to search. After Shift+A the node follows the mouse until
+  you click. Drop a node on a wire (the wire lights up) to put it in between.
 - Drag from an output socket to an input socket to connect them; drag a wire off an
   input to move or remove it. Drag the background to pan, scroll to zoom, **Home** to
   frame all nodes.
@@ -83,7 +84,11 @@ a live preview next to it that updates as you change anything.
 - **Ctrl+Shift+click** a node to see it through a Viewer node in the preview.
 - Number fields work like Blender's: drag sideways to change (Shift for fine steps),
   click to type a value.
-- **Apply to render** composites every frame at full size and remakes the MP4.
+- The preview size is a share of the render's resolution (25%, 50%, 75% or 100%).
+  Smaller is faster; 100% shows every pixel. A preview already made (same nodes, frame
+  and size, e.g. after undo) is shown again at once, and a timer shows how long each took.
+- **Apply to render** composites every frame at full size and remakes the MP4, with
+  the time taken and the time left.
 
 | Group | Nodes |
 | --- | --- |
@@ -95,8 +100,9 @@ a live preview next to it that updates as you change anything.
 | Distort | Lens Distortion, Transform, Rotate, Flip |
 
 How it works: with custom nodes the frames are first rendered as linear EXR. The
-preview keeps one Blender running that composites a smaller copy of the frame with
-your nodes (a few hundredths of a second each), so nothing is ever rendered again.
+preview keeps one Blender running that composites a copy of the frame with your
+nodes (a few hundredths of a second each). Neither the preview, any preview size,
+nor Apply renders the scene again: they all work from those saved frames.
 Custom nodes replace the compositing saved in the `.blend`; pick *As in file* to use
 the file's own nodes. Glare's *Sun Beams* type needs Blender 5.
 
